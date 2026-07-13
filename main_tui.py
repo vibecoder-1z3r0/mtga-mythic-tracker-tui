@@ -7,7 +7,6 @@ Professional terminal interface for tracking MTG Arena ranked sessions.
 import sys
 import argparse
 from pathlib import Path
-from datetime import datetime
 from typing import Optional, List
 
 from rich.text import Text
@@ -34,8 +33,8 @@ try:
     from src.core.state_manager import StateManager
     from src.core.event_state_manager import EventStateManager
     from src.core.event_data_manager import EventDataManager
-    from src.models.session import Session  # Changed from SessionTracker
-    from src.models.rank import Rank
+    from src.models.session import Session, SessionStatus  # Changed from SessionTracker
+    from src.models.rank import Rank, FormatType
     from src.models.game import Game, GameResult
     from src.models.event import (
         EntryCurrency,
@@ -155,9 +154,9 @@ class RankProgressWidget(Static):
                 pip_displays.append("[    ]")
         return "".join(pip_displays)
 
-    def update_rank(self, new_rank: Rank):
+    def update_rank(self, new_rank: Optional[Rank]):
         """Update rank display."""
-        self.current_rank = new_rank
+        self.current_rank = new_rank or Rank(tier="Bronze", division=1, pips=0)
         rank_display = self.query_one("#rank-display", Static)
         rank_display.update(self._format_rank_display())
 
@@ -192,7 +191,7 @@ class GameHistoryWidget(Static):
         for game in self.games[:20]:  # Show last 20 games
             time_str = game.timestamp.strftime("%H:%M")
             result_str = "🏆 W" if game.result == GameResult.WIN else "💀 L"
-            details = f"{game.play_draw} vs {game.opponent_deck or 'Unknown'}"
+            details = f"{game.play_order.value} vs {game.opponent_deck or 'Unknown'}"
             if game.notes:
                 details += f" - {game.notes[:30]}"
 
@@ -214,18 +213,19 @@ class SessionStatsWidget(Static):
         if not self.session:
             return "No active session"
 
-        stats = self.session.get_statistics()
-        duration = self.session.get_session_duration()
+        stats = self.session.stats
+        duration = self.session.get_duration_minutes()
+        games_per_hour = (stats.total_games / (duration / 60)) if duration > 0 else 0.0
 
-        return f"""Record: {stats['wins']}W - {stats['losses']}L
-Win Rate: {stats['win_rate']:.1f}%
-Duration: {duration}
-Games/Hour: {stats.get('games_per_hour', 0):.1f}
+        return f"""Record: {stats.wins}W - {stats.losses}L
+Win Rate: {stats.win_rate():.1f}%
+Duration: {duration} min
+Games/Hour: {games_per_hour:.1f}
 
 Starting Rank: {self.session.starting_rank}
 Current Rank: {self.session.current_rank}"""
 
-    def update_session(self, session: Session):
+    def update_session(self, session: Optional[Session]):
         """Update session display."""
         self.session = session
         stats_display = self.query_one("#stats-display", Static)
@@ -826,16 +826,13 @@ class MTGASessionTrackerApp(App):
         self.log_parser = EnhancedLogParser()
         self.session: Optional[Session] = None
 
-        # Load state - create simple state object for now
-        try:
-            self.app_state = self.state_manager.load_state()
-            if hasattr(self.app_state, "current_session") and self.app_state.current_session:
-                self.session = self.app_state.current_session
-        except Exception:
-            # Create simple state object if loading fails
-            from types import SimpleNamespace
-
-            self.app_state = SimpleNamespace(current_session=None)
+        # StateManager.state lazily loads (and falls back to a fresh AppState
+        # on any error), so resuming a crashed/interrupted session is just a
+        # matter of checking it here. Note: has_active_session() specifically
+        # means "status == ACTIVE", so a paused session needs a plain
+        # existence check to be resumed correctly too.
+        if self.state_manager.state.active_session is not None:
+            self.session = self.state_manager.state.active_session
 
     def compose(self) -> ComposeResult:
         """Create the main UI layout."""
@@ -884,46 +881,47 @@ class MTGASessionTrackerApp(App):
 
     def action_start_session(self):
         """Start a new tracking session."""
-        if self.session and self.session.end_time is None:
+        if self.state_manager.state.active_session is not None:
             self.notify("Session already active!", severity="warning")
             return
 
-        # Create new session
         current_rank = self._get_current_rank_from_logs()
-        self.session = Session(
-            format_type="Standard",  # TODO: Make configurable
-            starting_rank=current_rank,
-            start_time=datetime.now(),
-        )
-
-        self.app_state.current_session = self.session
-        try:
-            self.state_manager.save_state(self.app_state)
-        except Exception:
-            pass  # Ignore save errors for now
+        format_type = self._resolve_format_type(self.config.ui.default_format)
+        self.session = self.state_manager.start_session(format_type, current_rank)
 
         self._update_displays()
         self.notify("Session started!", severity="success")
 
     def action_end_session(self):
         """End the current session."""
-        if not self.session or self.session.end_time is not None:
+        if self.state_manager.state.active_session is None:
             self.notify("No active session!", severity="warning")
             return
 
-        self.session.end_time = datetime.now()
-
-        # Save session data
-        # TODO: Implement session persistence
-
-        self.app_state.current_session = None
-        try:
-            self.state_manager.save_state(self.app_state)
-        except Exception:
-            pass  # Ignore save errors for now
+        self.state_manager.end_session()
+        self.session = None
 
         self._update_displays()
         self.notify("Session ended!", severity="success")
+
+    def action_pause_session(self):
+        """Pause or resume the current session."""
+        session = self.state_manager.state.active_session
+        if session is None:
+            self.notify("No active session!", severity="warning")
+            return
+
+        if session.status == SessionStatus.PAUSED:
+            self.state_manager.resume_session()
+            self.notify("Session resumed!", severity="success")
+        else:
+            self.state_manager.pause_session()
+            self.notify("Session paused!", severity="success")
+
+    def action_add_note(self):
+        """Add a note to the current game."""
+        # TODO: Implement note input (needs a text input modal)
+        self.notify("Add note - TODO: Implement note input", severity="info")
 
     def action_show_logs(self):
         """Show the log viewer."""
@@ -960,16 +958,22 @@ class MTGASessionTrackerApp(App):
         # TODO: Parse most recent rank from logs
         return Rank(tier="Platinum", division=4, pips=3)  # Placeholder
 
+    @staticmethod
+    def _resolve_format_type(format_name: str) -> FormatType:
+        """Map a user-facing MTGA format name (Standard/Alchemy/Historic/
+        Explorer/Limited/...) to the internal Constructed-vs-Limited
+        category used for session/game stats."""
+        if format_name and format_name.lower() in ("limited", "draft", "sealed"):
+            return FormatType.LIMITED
+        return FormatType.CONSTRUCTED
+
     def _update_displays(self):
         """Update all display widgets."""
-        if self.session:
-            # Update stats widget
-            stats_widget = self.query_one(SessionStatsWidget)
-            stats_widget.update_session(self.session)
+        stats_widget = self.query_one(SessionStatsWidget)
+        stats_widget.update_session(self.session)
 
-            # Update rank widget
-            rank_widget = self.query_one(RankProgressWidget)
-            rank_widget.update_rank(self.session.current_rank)
+        rank_widget = self.query_one(RankProgressWidget)
+        rank_widget.update_rank(self.session.current_rank if self.session else None)
 
     def _start_log_monitoring(self):
         """Start monitoring MTGA log file for real-time updates."""
@@ -1026,19 +1030,21 @@ Examples:
 
 
 def apply_cli_config(args, config):
-    """Apply command line arguments to configuration."""
+    """Apply command line arguments to configuration.
+
+    `config` is the pydantic Config instance (config_manager.config), not a
+    dict, so overrides go through normal attribute access.
+    """
     if args.log_path:
-        config.setdefault("mtga", {})["log_file_path"] = args.log_path
+        config.mtga.log_file_path = args.log_path
     if args.format:
-        config.setdefault("tracking", {})["default_format"] = args.format
+        config.ui.default_format = args.format
     if args.theme:
-        config.setdefault("ui", {})["theme"] = args.theme
+        config.ui.theme = args.theme
     if args.demotion_threshold:
-        config.setdefault("ui", {})["demotion_threshold"] = args.demotion_threshold
+        config.ui.demotion_threshold = args.demotion_threshold
     if args.no_auto_save:
-        config.setdefault("tracking", {})["auto_save"] = False
-    if args.debug:
-        config.setdefault("debug", {})["enabled"] = True
+        config.ui.auto_save_interval = 0
 
     return config
 
