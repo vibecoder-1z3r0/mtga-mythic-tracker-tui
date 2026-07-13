@@ -119,5 +119,89 @@ Extremely productive session! We built a solid foundation with real MTGA log int
 **User Value**: Already parsing and displaying real MTGA sessions ✅  
 
 ---
-*Total Development Time: 1h 32min*  
-*Next Session: TBD*
+
+## Session 2: Enhanced Log Parser + TUI Layout
+**Date**: August 10, 2025 (continued)
+**Duration**: ~45min
+**Status**: ✅ Complete
+
+### 🚀 Accomplishments
+- ✅ Enhanced log parser with real match-result detection
+- ✅ TUI layout optimization for scrollable detail views
+- ✅ Bug fixes around usage-limit reset handling
+
+---
+
+## Session 3: Main TUI Implementation
+**Date**: August 10, 2025 (final)
+**Duration**: ~35min
+**Status**: ✅ Complete
+
+### 🚀 Accomplishments
+- ✅ Main TUI implementation with CLI argument parsing
+- ✅ Configuration screen (Ctrl+,)
+- ✅ Import fixes bringing the full working application together
+
+### 📈 Success Metrics
+- ✅ **Full Working Application**: Professional interface with side panels, CLI args, and settings screen
+
+---
+
+## Session 4: Configuration Screen Bug Fix
+**Date**: August 11, 2025
+**Duration**: ~15min
+**Status**: ✅ Complete
+
+### 🚀 Accomplishments
+- ✅ Fixed Pydantic object access in `ConfigurationScreen` — replaced `dict.get()` calls with proper attribute access
+
+---
+
+## Session 5: Boss Fight Indicators + Goal System
+**Date**: August 12, 2025
+**Duration**: ~1h 30min
+**Status**: ✅ Complete
+
+### 🚀 Accomplishments
+- ✅ Boss fight indicators (next win promotes to the next tier)
+- ✅ Goal system for session tracking
+- ✅ Stats editing directly in the TUI
+- ✅ BO1/BO3 format switching support
+- ✅ Timer improvements and keybinding reorganization
+
+---
+
+## Session 6: Advanced Timer Systems + Milestones
+**Date**: August 13, 2025
+**Duration**: ~1h 15min
+**Status**: ✅ Complete
+
+### 🚀 Accomplishments
+- ✅ Game timer with pause/resume support
+- ✅ Milestone celebration toasts
+- ✅ Dual time tracking (game time + session time)
+- ✅ Various error fixes
+
+---
+
+## Session 7: Docs Cleanup, Test Suite Hardening, CI
+**Date**: July 13, 2026
+**Duration**: TBD
+**Status**: ✅ Complete
+
+### 🚀 Accomplishments
+- ✅ Removed stale prompt-logging instructions and script from CLAUDE.md (leftover from a Claude Code CLI session, not applicable to Claude Code on the web)
+- ✅ Converted all `test_*.py` scripts from print-only scripts (which silently passed even when broken) into real pytest-style tests with actual assertions
+- ✅ Found and fixed a real parser bug: `_analyze_json_event` was corrupting event types with a `_[RANK?]` suffix whenever JSON contained rank-related keywords, breaking exact-match dispatch for both mock and real logs
+- ✅ Fixed `create_mock_log_data()` to emit bare JSON lines matching the real MTGA log format (previous mock data used a stale bracketed-timestamp format the parser no longer accepts)
+- ✅ Isolated tests that touch the global config/state singletons from the real `~/.config/mtga-tracker` directory
+- ✅ Added `black` + `flake8` tooling (`pyproject.toml`, `.flake8`) and cleaned up the resulting findings across the codebase (unused imports, bare excepts, stray f-strings, etc.)
+- ✅ Added GitHub Actions CI (`.github/workflows/ci.yml`) running black, flake8, and pytest on every push/PR
+- ✅ Brought VIBE-CODING.md up to date with sessions 2-7
+
+### 💭 Session Reflection
+Housekeeping session prompted by realizing the project's CI story was nonexistent and the "tests" weren't actually testing anything (they swallowed exceptions and always printed success). Tracing through the test logic surfaced two real, previously-silent bugs in the parser. The codebase is now in a state where a red CI run means something actually broke.
+
+---
+*Total Development Time: 5h 52min+*
+*Next Session: Historic Pauper Challenge event/run tracking mode*

@@ -68,7 +68,29 @@ source ~/.venv-tui/bin/activate && python3 test_parser.py
 
 # Test data persistence layer
 source ~/.venv-tui/bin/activate && python3 test_data.py
+
+# Or run the whole suite through pytest (used in CI)
+source ~/.venv-tui/bin/activate && pip install -r requirements-dev.txt
+pytest test_models.py test_config.py test_state.py test_parser.py test_data.py -v
 ```
+
+### Linting & Formatting
+```bash
+# Check formatting (black) and lint (flake8) - same checks as CI
+source ~/.venv-tui/bin/activate && pip install -r requirements-dev.txt
+black --check .
+flake8 .
+
+# Auto-format
+black .
+```
+Config lives in `pyproject.toml` (black) and `.flake8` (flake8). The
+`manual/` directory is a separate standalone sub-project and is excluded
+from both.
+
+### Continuous Integration
+GitHub Actions (`.github/workflows/ci.yml`) runs `black --check`, `flake8`,
+and the pytest suite on every push and pull request against `main`.
 
 ### Real Log Analysis Tools
 ```bash
@@ -99,19 +121,24 @@ source ~/.venv-tui/bin/activate
 ### Project Structure
 ```
 mythic-tracker-tui/
+├── .github/workflows/   # CI (black, flake8, pytest)
 ├── src/
 │   ├── models/          # Data structures (rank, game, session)
 │   ├── config/          # Configuration management
 │   ├── core/            # State management, data persistence
 │   ├── parsers/         # MTGA log parsing
 │   └── ui/              # TUI framework components
+├── manual/              # Separate standalone manual-entry sub-project (own CLAUDE.md/README)
 ├── main_tui.py          # ⭐ MAIN APPLICATION - Professional TUI
 ├── textual_log_viewer.py # Enhanced log browser with statistics
 ├── mtga-test-logs/      # Real MTGA log files for testing
 ├── test_*.py            # Test files for each component
 ├── configure_log_path.py # MTGA log path configuration
 ├── analyze_*.py         # Log analysis tools
-├── requirements.txt     # Python dependencies
+├── requirements.txt     # Runtime Python dependencies
+├── requirements-dev.txt # + pytest, black, flake8
+├── pyproject.toml       # black config
+├── .flake8              # flake8 config
 └── CLAUDE.md            # This documentation
 ```
 
@@ -286,9 +313,10 @@ The core TUI application is fully functional and ready for daily use by MTG Aren
 | 2025-08-11 | 15min | Configuration Screen Bug Fix | ✅ Fixed Pydantic object access in ConfigurationScreen - replaced dict.get() with attribute access |
 | 2025-08-12 | 1h 30min | Boss Fight Indicators, Goal System, Stats Editing, BO1/BO3 Support, Timer Improvements | ✅ Manual TUI enhancements, format switching, real-time timers, keybinding reorganization |
 | 2025-08-13 | 1h 15min | Advanced Timer Systems, Milestone Celebrations, Dual Time Tracking | ✅ Game timer, pause/resume, milestone toasts, dual time tracking, error fixes |
+| 2026-07-13 | TBD | Docs Cleanup, Test Suite Hardening (real assertions), Parser Bug Fixes, black/flake8, GitHub Actions CI | ✅ Removed stale prompt-logging instructions; converted print-only test scripts into real pytest tests; fixed a real event-type corruption bug in the log parser; added lint tooling and CI |
 
 ### Session Metrics
-- **Total Development Time**: 5h 52min
+- **Total Development Time**: 5h 52min+
 - **Features Completed**: 12/12 major components ✅
 - **Test Coverage**: All core components have dedicated test files  
 - **Architecture Stability**: ✅ Complete - Production-ready TUI application
