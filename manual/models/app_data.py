@@ -4,10 +4,11 @@ App data model for MTGA Manual TUI Tracker.
 Contains AppData class that holds the complete application state.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Optional
 from .rank import ManualRank, RankTier, FormatType
 from .session import SessionStats
+from .event import EventStats
 
 
 @dataclass
@@ -22,7 +23,9 @@ class AppData:
     hidden_tiers: List[RankTier] = None
     auto_collapse_mode: bool = False
     auto_hide_mode: bool = False
-    
+    event_stats: EventStats = field(default_factory=EventStats)
+    view_mode: str = "ranked"  # "ranked" or "event" - which panels are shown
+
     def __post_init__(self):
         if self.collapsed_tiers is None:
             self.collapsed_tiers = []

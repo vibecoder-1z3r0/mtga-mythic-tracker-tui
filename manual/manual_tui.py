@@ -24,6 +24,17 @@ from textual.message import Message
 
 # Import models from our new modules
 from models import FormatType, RankTier, ManualRank, CompletedSession, SessionStats, AppData
+from models import (
+    EntryCurrency,
+    EventDefinition,
+    EventGame,
+    EventGameResult,
+    EventRun,
+    EventRunStatus,
+    EventStats,
+    default_catalog_path,
+    load_event_catalog,
+)
 from storage import StateManager
 
 # === MODELS === (NOW IMPORTED FROM models/ PACKAGE)
@@ -919,6 +930,123 @@ Streak:   {current_streak_text}
             session_section.update(session_content)
         except:
             pass  # Ignore if section not found
+
+
+def _get_event_for_stats(
+    event_stats: EventStats, event_catalog: List[EventDefinition]
+) -> Optional[EventDefinition]:
+    """Look up the EventDefinition matching the currently-tracked event."""
+    for event in event_catalog:
+        if event.event_id == event_stats.event_id:
+            return event
+    return event_catalog[0] if event_catalog else None
+
+
+class EventRunPanel(Static):
+    """Left panel showing the current event run (Event Mode)."""
+
+    def __init__(self, app_data: AppData, event_catalog: List[EventDefinition]):
+        super().__init__()
+        self.app_data = app_data
+        self.event_catalog = event_catalog
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Static("─ Event Mode: Current Run ─", classes="panel-header")
+            yield Static("─" * 30, classes="separator")
+            yield self._create_run_section()
+            yield Static("─" * 30, classes="separator")
+            yield Static(
+                "[U] Start Run  [W] Win  [L] Loss  [R] Restart Session  [V] Back to Ranked",
+                classes="help-text",
+            )
+
+    def _create_run_section(self) -> Static:
+        event = _get_event_for_stats(self.app_data.event_stats, self.event_catalog)
+        if not event:
+            return Static("No events configured in events.json", classes="session-section")
+
+        run = self.app_data.event_stats.current_run
+        lines = [f"🎮 {event.name} ({event.format})", ""]
+
+        if not run:
+            lines.append("No active run. Press [U] to start a new run.")
+            return Static("\n".join(lines), classes="session-section")
+
+        win_bars = "".join(
+            "[gold1][██][/gold1]" if i < run.wins else "[  ]" for i in range(event.win_cap)
+        )
+        loss_bars = "".join(
+            "[red][▓▓][/red]" if i < run.losses else "[  ]" for i in range(event.loss_cap)
+        )
+
+        lines.append(f"Deck: {run.player_deck or 'Unknown'}")
+        lines.append(f"Wins:   {win_bars}")
+        lines.append(f"Losses: {loss_bars}")
+        lines.append("")
+        lines.append(f"Record: {run.wins}-{run.losses}")
+
+        prize = run.prize(event)
+        lines.append(f"Prize so far: {prize.gems} gems, {prize.packs} packs")
+
+        profit = run.net_profit_gems(event)
+        if profit is not None:
+            sign = "+" if profit >= 0 else ""
+            lines.append(f"Net profit: {sign}{profit} gems")
+
+        milestone = run.highest_milestone(event)
+        lines.append(f"Milestone: {milestone.name if milestone else 'None yet'}")
+
+        if run.status == EventRunStatus.ENDED:
+            lines.append("")
+            lines.append("[bold green]Run complete! Press [U] for a new run.[/bold green]")
+
+        return Static("\n".join(lines), classes="session-section")
+
+
+class EventStatsPanel(Static):
+    """Right panel showing event session and all-time stats (Event Mode)."""
+
+    def __init__(self, app_data: AppData, event_catalog: List[EventDefinition]):
+        super().__init__()
+        self.app_data = app_data
+        self.event_catalog = event_catalog
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Static("─ Event Session & All-Time Stats ─", classes="panel-header")
+            yield Static("─" * 30, classes="separator")
+            yield self._create_session_section()
+            yield Static("─" * 30, classes="separator")
+            yield self._create_alltime_section()
+            yield Static("─" * 30, classes="separator")
+
+    def _create_session_section(self) -> Static:
+        stats = self.app_data.event_stats
+        lines = [
+            "📊 CURRENT SESSION",
+            f"Runs played: {stats.session_runs_played}",
+            f"Record: [{stats.session_wins}W] - [{stats.session_losses}L]",
+            f"Prize: {stats.session_gems} gems, {stats.session_packs} packs",
+        ]
+        if stats.session_milestone_counts:
+            counts_str = ", ".join(f"{k}: {v}" for k, v in stats.session_milestone_counts.items())
+            lines.append(f"Milestones: {counts_str}")
+        return Static("\n".join(lines), classes="session-section")
+
+    def _create_alltime_section(self) -> Static:
+        stats = self.app_data.event_stats
+        lines = [
+            "🏆 ALL-TIME TOTAL",
+            f"Runs played: {stats.alltime_runs_played}",
+            f"Record: [{stats.alltime_wins}W] - [{stats.alltime_losses}L]",
+            f"Prize: {stats.alltime_gems} gems, {stats.alltime_packs} packs",
+        ]
+        if stats.alltime_milestone_counts:
+            counts_str = ", ".join(f"{k}: {v}" for k, v in stats.alltime_milestone_counts.items())
+            lines.append(f"Milestones: {counts_str}")
+        return Static("\n".join(lines), classes="season-section")
+
 
 class EditStatsModal(ModalScreen):
     """Modal dialog for editing session/season stats."""
@@ -2139,21 +2267,30 @@ class ManualTUIApp(App):
         Binding("ctrl+q", "quit", "Quit"),
         Binding("?", "help", "Help"),
         Binding("i", "about", "About"),
+        Binding("v", "toggle_event_mode", "Event Mode"),
+        Binding("u", "start_event_run", "Start Run (Event Mode)"),
     ]
     
     def __init__(self, state_manager: StateManager):
         super().__init__()
         self.state_manager = state_manager
         self.app_data = state_manager.load_state()
-    
+        self.event_catalog = load_event_catalog(default_catalog_path())
+
     def compose(self) -> ComposeResult:
         with Container():
             yield TopPanel(self.app_data).add_class("top-panel")
-            
+
             with Container(id="main-content"):
-                yield RankProgressPanel(self.app_data).add_class("left-panel")
-                yield StatsPanel(self.app_data).add_class("right-panel")
-            
+                if self.app_data.view_mode == "event":
+                    yield EventRunPanel(self.app_data, self.event_catalog).add_class("left-panel")
+                    yield EventStatsPanel(self.app_data, self.event_catalog).add_class(
+                        "right-panel"
+                    )
+                else:
+                    yield RankProgressPanel(self.app_data).add_class("left-panel")
+                    yield StatsPanel(self.app_data).add_class("right-panel")
+
             yield Footer()
     
     def on_mount(self) -> None:
@@ -2217,7 +2354,11 @@ class ManualTUIApp(App):
         return current_rank.division <= goal_division
     
     def action_add_win(self) -> None:
-        """Add a win to the session."""
+        """Add a win to the session (or the current event run, in Event Mode)."""
+        if self.app_data.view_mode == "event":
+            self._event_record_result(EventGameResult.WIN)
+            return
+
         # Check goal status before the win
         stats = self.app_data.stats
         current_rank = self.app_data.get_current_rank()
@@ -2253,7 +2394,11 @@ class ManualTUIApp(App):
         self.refresh_panels()
     
     def action_add_loss(self) -> None:
-        """Add a loss to the session."""
+        """Add a loss to the session (or the current event run, in Event Mode)."""
+        if self.app_data.view_mode == "event":
+            self._event_record_result(EventGameResult.LOSS)
+            return
+
         # Update rank
         current_rank = self.app_data.get_current_rank()
         new_rank = current_rank.add_loss()
@@ -2524,9 +2669,13 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
         self.refresh_panels()
     
     def action_restart_session(self) -> None:
-        """Restart current session (same as reset)."""
+        """Restart current session (same as reset), or the event session in Event Mode."""
+        if self.app_data.view_mode == "event":
+            self._event_restart_session()
+            return
+
         modal = ConfirmationModal("Restart session? This will reset wins/losses and session timer.")
-        
+
         def handle_restart_result(result):
             if result:
                 current_rank = self.app_data.get_current_rank()
@@ -2534,8 +2683,68 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
                 self.app_data.stats.complete_current_session(current_rank, self.app_data.current_format)
                 self.app_data.stats.reset_session(current_rank)
                 self.refresh_panels()
-        
+
         self.push_screen(modal, handle_restart_result)
+
+    def action_toggle_event_mode(self) -> None:
+        """Toggle between the ranked view and the event-mode view."""
+        self.app_data.view_mode = "event" if self.app_data.view_mode == "ranked" else "ranked"
+        self.refresh_panels()
+        self.notify(f"Switched to {self.app_data.view_mode.title()} view", severity="information")
+
+    def action_start_event_run(self) -> None:
+        """Start a new event run (Event Mode only)."""
+        if self.app_data.view_mode != "event":
+            self.notify("Press V to switch to Event Mode first", severity="warning")
+            return
+
+        stats = self.app_data.event_stats
+        if stats.current_run and stats.current_run.status == EventRunStatus.ACTIVE:
+            self.notify("Current run hasn't ended yet!", severity="warning")
+            return
+
+        event = self._get_current_event_definition()
+        if not event:
+            self.notify("No events configured in events.json", severity="error")
+            return
+
+        run_id = f"run_{stats.alltime_runs_played + 1}"
+        run = EventRun(run_id=run_id, event_id=event.event_id, entry_currency=EntryCurrency.GEMS)
+        stats.start_run(run)
+        self.refresh_panels()
+        self.notify("New run started!", severity="success")
+
+    def _get_current_event_definition(self) -> Optional[EventDefinition]:
+        """The EventDefinition matching the currently-tracked event."""
+        return _get_event_for_stats(self.app_data.event_stats, self.event_catalog)
+
+    def _event_record_result(self, result: EventGameResult) -> None:
+        """Record a win/loss against the current event run."""
+        event = self._get_current_event_definition()
+        if not event:
+            self.notify("No events configured in events.json", severity="error")
+            return
+
+        stats = self.app_data.event_stats
+        if not stats.current_run or stats.current_run.status == EventRunStatus.ENDED:
+            self.notify("No active run! Press [U] to start one.", severity="warning")
+            return
+
+        stats.record_game(EventGame(result=result), event)
+        self.refresh_panels()
+
+    def _event_restart_session(self) -> None:
+        """Reset event session totals (keeps all-time totals), with confirmation."""
+        modal = ConfirmationModal(
+            "Restart event session? This clears session totals (all-time totals are kept)."
+        )
+
+        def handle_result(result):
+            if result:
+                self.app_data.event_stats.restart_session()
+                self.refresh_panels()
+
+        self.push_screen(modal, handle_result)
     
     def action_pause_resume_session(self) -> None:
         """Pause or resume the session timer."""
@@ -2753,7 +2962,7 @@ Press any key to close this help."""
         """Refresh all panels with current data."""
         # Update the top panel
         self.update_status()
-        
+
         # Force refresh of rank progress panel by removing and re-adding
         try:
             main_content = self.query_one("#main-content")
@@ -2762,10 +2971,18 @@ Press any key to close this help."""
             right_panel = self.query_one(".right-panel")
             left_panel.remove()
             right_panel.remove()
-            
-            # Add new panels with updated data
-            main_content.mount(RankProgressPanel(self.app_data).add_class("left-panel"))
-            main_content.mount(StatsPanel(self.app_data).add_class("right-panel"))
+
+            # Add new panels with updated data, matching the current view mode
+            if self.app_data.view_mode == "event":
+                main_content.mount(
+                    EventRunPanel(self.app_data, self.event_catalog).add_class("left-panel")
+                )
+                main_content.mount(
+                    EventStatsPanel(self.app_data, self.event_catalog).add_class("right-panel")
+                )
+            else:
+                main_content.mount(RankProgressPanel(self.app_data).add_class("left-panel"))
+                main_content.mount(StatsPanel(self.app_data).add_class("right-panel"))
         except Exception as e:
             # Log the error but continue
             self.notify(f"Panel refresh error: {e}", severity="warning")

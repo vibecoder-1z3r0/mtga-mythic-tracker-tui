@@ -12,6 +12,14 @@ from typing import Optional
 from dataclasses import asdict
 
 from models import FormatType, RankTier, ManualRank, CompletedSession, SessionStats, AppData
+from models import (
+    EntryCurrency,
+    EventGame,
+    EventGameResult,
+    EventRun,
+    EventRunStatus,
+    EventStats,
+)
 
 
 class StateManager:
@@ -73,6 +81,11 @@ class StateManager:
             
             stats = SessionStats(**stats_data)
             
+            event_stats_data = data.get('event_stats')
+            event_stats = (
+                self._reconstruct_event_stats(event_stats_data) if event_stats_data else EventStats()
+            )
+
             return AppData(
                 constructed_rank=constructed_rank,
                 limited_rank=limited_rank,
@@ -82,7 +95,9 @@ class StateManager:
                 collapsed_tiers=[RankTier(t) for t in data.get('collapsed_tiers', [])],
                 hidden_tiers=[RankTier(t) for t in data.get('hidden_tiers', [])],
                 auto_collapse_mode=data.get('auto_collapse_mode', False),
-                auto_hide_mode=data.get('auto_hide_mode', False)
+                auto_hide_mode=data.get('auto_hide_mode', False),
+                event_stats=event_stats,
+                view_mode=data.get('view_mode', 'ranked')
             )
             
         except Exception as e:
@@ -105,7 +120,9 @@ class StateManager:
                 'collapsed_tiers': [t.value for t in app_data.collapsed_tiers],
                 'hidden_tiers': [t.value for t in app_data.hidden_tiers],
                 'auto_collapse_mode': app_data.auto_collapse_mode,
-                'auto_hide_mode': app_data.auto_hide_mode
+                'auto_hide_mode': app_data.auto_hide_mode,
+                'event_stats': asdict(app_data.event_stats),
+                'view_mode': app_data.view_mode
             }
             
             # Serialize datetime objects
@@ -219,9 +236,33 @@ class StateManager:
         # Migrate current_format
         if data.get('current_format') == 'Constructed':
             data['current_format'] = 'Constructed BO1'
-        
+
         # Migrate rank format_type fields
         for rank_key in ['constructed_rank', 'limited_rank']:
             if rank_key in data and 'format_type' in data[rank_key]:
                 if data[rank_key]['format_type'] == 'Constructed':
                     data[rank_key]['format_type'] = 'Constructed BO1'
+
+    def _reconstruct_event_game(self, game_dict: dict) -> EventGame:
+        """Rebuild an EventGame from its serialized dict form."""
+        game_dict = dict(game_dict)
+        game_dict['result'] = EventGameResult(game_dict['result'])
+        return EventGame(**game_dict)
+
+    def _reconstruct_event_run(self, run_dict: dict) -> EventRun:
+        """Rebuild an EventRun (and its nested games) from serialized form."""
+        run_dict = dict(run_dict)
+        run_dict['games'] = [self._reconstruct_event_game(g) for g in run_dict.get('games', [])]
+        run_dict['status'] = EventRunStatus(run_dict['status'])
+        run_dict['entry_currency'] = EntryCurrency(run_dict['entry_currency'])
+        return EventRun(**run_dict)
+
+    def _reconstruct_event_stats(self, stats_dict: dict) -> EventStats:
+        """Rebuild EventStats (and its nested runs) from serialized form."""
+        stats_dict = dict(stats_dict)
+        if stats_dict.get('current_run'):
+            stats_dict['current_run'] = self._reconstruct_event_run(stats_dict['current_run'])
+        stats_dict['recent_runs'] = [
+            self._reconstruct_event_run(r) for r in stats_dict.get('recent_runs', [])
+        ]
+        return EventStats(**stats_dict)

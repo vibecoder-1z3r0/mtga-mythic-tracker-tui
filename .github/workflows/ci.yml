@@ -41,3 +41,27 @@ jobs:
           name: snapshot-report
           path: snapshot_report.html
           if-no-files-found: ignore
+
+  manual-tui-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies (manual/ is standalone)
+        run: |
+          cd manual
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run tests (pytest)
+        run: |
+          cd manual
+          pytest test_event_models.py -v

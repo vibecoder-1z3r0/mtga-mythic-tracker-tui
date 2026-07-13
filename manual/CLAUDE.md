@@ -19,6 +19,36 @@ A completely standalone Terminal User Interface (TUI) application for manually t
 ✅ **Enhanced Statistics** - Win rates, current/best/worst streaks  
 ✅ **Season Management** - Countdown timers, editable dates  
 ✅ **State Persistence** - Auto-save/load with CLI options  
+✅ **Event Mode** - Run-based event tracking (Historic Pauper Challenge, etc.), toggled with **V**
+
+### Event Mode (run-based events, e.g. Historic Pauper Challenge)
+A second, independent tracking mode alongside the ranked ladder, for events
+with win/loss-capped runs and a fixed prize table instead of tiers/pips.
+Kept fully standalone (dataclasses, no imports from the parent project's
+`src/`), matching this app's architecture:
+
+- `models/event.py` — `EventDefinition`, `EventRun`, `EventGame`,
+  `EventStats` as plain dataclasses (this app's convention, vs. the
+  pydantic models in the parent `src/models/event.py`).
+- `events.json` (this directory) — this app's own copy of the event
+  catalog, so the app remains portable/standalone. Same catalog format
+  as the parent project.
+- `EventStats` mirrors `SessionStats`'s session-vs-season split:
+  `session_*` counters reset when you restart the event session (**R**
+  in Event Mode), `alltime_*` counters never reset. Both are folded from
+  each completed run automatically (`EventStats.record_game`).
+- `storage/state_manager.py` — `AppData.event_stats` is persisted in the
+  same single `tracker_state.json` blob as everything else, following
+  this app's "one big JSON file" convention rather than the parent
+  project's per-file managers.
+- UI: pressing **V** swaps the two main panels for `EventRunPanel` /
+  `EventStatsPanel` (gold `[██]` win pips, red `[▓▓]` loss pips). **W**/
+  **L** are context-sensitive — they drive the ranked rank or the event
+  run depending on which view is active. **U** starts a new run, **R**
+  restarts the event session (confirmation modal, same as ranked).
+- Tests: `test_event_models.py` (pytest), covering prize/milestone
+  lookup, run completion, session/all-time aggregation, and a
+  StateManager save/load round-trip.
 
 ## TUI Layout
 
