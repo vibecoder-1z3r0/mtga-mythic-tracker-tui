@@ -198,10 +198,19 @@ Extremely productive session! We built a solid foundation with real MTGA log int
 - ✅ Added `black` + `flake8` tooling (`pyproject.toml`, `.flake8`) and cleaned up the resulting findings across the codebase (unused imports, bare excepts, stray f-strings, etc.)
 - ✅ Added GitHub Actions CI (`.github/workflows/ci.yml`) running black, flake8, and pytest on every push/PR
 - ✅ Brought VIBE-CODING.md up to date with sessions 2-7
+- ✅ Added event mode: a parallel run-based tracking system for special limited-time events (starting with the Historic Pauper Challenge — Bo1, 7 wins or 2 losses, gold/gems entry, a fixed prize table)
+  - `src/models/event.py`: `EventDefinition`, `EventRun`, `EventSession`, `EventAppState` — separate from Rank/Session since the shape (win/loss caps, no tiers) doesn't fit the ranked ladder models
+  - `events.json`: hand-edited catalog supporting multiple concurrent events with independent structures
+  - `src/core/event_state_manager.py` / `event_data_manager.py`: persistence plus per-event and grand-total (all events) aggregate stats
+  - Milestones (Winning Run/Free Run/Profit Run/Trophy) computed both as a highest-tier label per run and as cumulative counts
+  - Net profit calculation in gems (only meaningful when the entry was paid in gems, since gold has no fixed gems conversion)
+  - New `EventScreen` in `main_tui.py` (bound to **V**), with gold/red win-loss pip displays
+  - Found and fixed two real bugs while building this: a session-ID collision (second-resolution timestamps let two sessions started in the same second silently overwrite each other's save file) and a button-layout overflow (5 control buttons in a half-width panel overflowed an 80-column terminal, making 2 of them unclickable) — both caught via Textual's headless pilot test harness since the user couldn't test interactively
+  - Full pytest coverage in `test_event_models.py` (10 tests) plus an end-to-end click-driven pilot test covering the whole run→session→persistence→overall-stats flow
 
 ### 💭 Session Reflection
-Housekeeping session prompted by realizing the project's CI story was nonexistent and the "tests" weren't actually testing anything (they swallowed exceptions and always printed success). Tracing through the test logic surfaced two real, previously-silent bugs in the parser. The codebase is now in a state where a red CI run means something actually broke.
+Housekeeping session prompted by realizing the project's CI story was nonexistent and the "tests" weren't actually testing anything (they swallowed exceptions and always printed success). Tracing through the test logic surfaced two real, previously-silent bugs in the parser. The codebase is now in a state where a red CI run means something actually broke. Continued into building the event-mode tracker for an upcoming Historic Pauper Challenge; since the user couldn't test the TUI directly, verification leaned on Textual's `run_test()` pilot harness, which caught two more real bugs (session-ID collisions and an off-screen button layout) before they could reach production.
 
 ---
 *Total Development Time: 5h 52min+*
-*Next Session: Historic Pauper Challenge event/run tracking mode*
+*Next Session: TBD*

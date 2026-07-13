@@ -93,12 +93,21 @@ class Config(BaseModel):
         """Get the application state file path."""
         return self.get_data_dir() / "state.json"
 
+    def get_events_dir(self) -> Path:
+        """Get the event session data directory path."""
+        return self.get_data_dir() / "events"
+
+    def get_event_state_file(self) -> Path:
+        """Get the active event session state file path."""
+        return self.get_data_dir() / "event_state.json"
+
     def ensure_directories(self) -> None:
         """Create all required directories."""
         dirs_to_create = [
             self.get_data_dir(),
             self.get_sessions_dir(),
             self.get_logs_dir(),
+            self.get_events_dir(),
         ]
 
         for directory in dirs_to_create:

@@ -6,11 +6,45 @@ A Terminal User Interface (TUI) application for tracking MTG Arena ranked sessio
 ## Architecture
 
 ### Core Components
-- **Models** (`src/models/`): Data structures for ranks, games, sessions
+- **Models** (`src/models/`): Data structures for ranks, games, sessions, and events
 - **Config** (`src/config/`): Settings and configuration management
 - **Core** (`src/core/`): Application state management
 - **Parsers** (`src/parsers/`): MTGA log file parsing
 - **UI** (`src/ui/`): Textual-based TUI framework (coming soon)
+
+### Event Mode (run-based events, e.g. Historic Pauper Challenge)
+Ranked ladder tracking (tiers/pips) and event tracking (win/loss-capped runs
+with a fixed prize table) are different enough shapes that events get their
+own parallel model/manager stack rather than being bolted onto Session/Rank:
+
+- `src/models/event.py` — `EventDefinition` (win/loss caps, entry cost,
+  prize table, milestone thresholds), `EventRun` (a single attempt, ends at
+  win_cap wins or loss_cap losses), `EventSession` (a sitting containing one
+  or more runs), `EventAppState` (crash-recovery, parallel to `AppState`).
+- `events.json` (repo root) — hand-edited catalog of event definitions, one
+  entry per event by `event_id`. Supports multiple concurrently-running
+  events with independent win/loss caps and prize tables. A TUI editor for
+  this catalog is a possible future enhancement; for now it's edited by
+  hand. Fill in `start_date`/`end_date` once known.
+- `src/core/event_state_manager.py` / `src/core/event_data_manager.py` —
+  parallel to `StateManager`/`DataManager`: persist the active session,
+  and aggregate lifetime stats both per-event (`get_overall_stats`) and as
+  a grand total across every event ever played (`get_grand_total`).
+- `src/core/serialization.py` — shared datetime (de)serialize helpers used
+  by the two event managers.
+- Milestones (e.g. "Winning Run" at 3+ wins, "Trophy" at win_cap) are
+  configured per-event in `events.json` and computed both ways: a run's
+  `highest_milestone()` picks the single highest threshold met, while
+  `EventSession.milestone_counts()` tallies cumulatively (a 7-win run
+  counts toward "3+ wins", "5+ wins", etc. all at once).
+- Net profit (`EventRun.net_profit_gems()`) only nets cleanly when the
+  entry fee was paid in gems (gold has no fixed gems conversion rate).
+- In the TUI (`main_tui.py`), press **V** to open `EventScreen`, a full
+  screen (not a modal) showing the current run's win/loss pips in
+  gold/red, session totals, and overall totals side by side. Win/Loss/New
+  Run/End Session/Back are wired as both buttons and keybindings — buttons
+  are the reliable path, since a focused `Input` widget swallows
+  single-letter keys as text before they reach screen bindings.
 
 ### Key Features Implemented
 ✅ **Rank System** - Full MTG Arena rank progression with demotion protection  
@@ -69,9 +103,12 @@ source ~/.venv-tui/bin/activate && python3 test_parser.py
 # Test data persistence layer
 source ~/.venv-tui/bin/activate && python3 test_data.py
 
+# Test event mode (EventDefinition/EventRun/EventSession, state/data managers)
+source ~/.venv-tui/bin/activate && python3 test_event_models.py
+
 # Or run the whole suite through pytest (used in CI)
 source ~/.venv-tui/bin/activate && pip install -r requirements-dev.txt
-pytest test_models.py test_config.py test_state.py test_parser.py test_data.py -v
+pytest test_models.py test_config.py test_state.py test_parser.py test_data.py test_event_models.py -v
 ```
 
 ### Linting & Formatting
@@ -123,13 +160,14 @@ source ~/.venv-tui/bin/activate
 mythic-tracker-tui/
 ├── .github/workflows/   # CI (black, flake8, pytest)
 ├── src/
-│   ├── models/          # Data structures (rank, game, session)
+│   ├── models/          # Data structures (rank, game, session, event)
 │   ├── config/          # Configuration management
-│   ├── core/            # State management, data persistence
+│   ├── core/            # State management, data persistence (ranked + event)
 │   ├── parsers/         # MTGA log parsing
 │   └── ui/              # TUI framework components
 ├── manual/              # Separate standalone manual-entry sub-project (own CLAUDE.md/README)
-├── main_tui.py          # ⭐ MAIN APPLICATION - Professional TUI
+├── main_tui.py          # ⭐ MAIN APPLICATION - Professional TUI (incl. event mode)
+├── events.json           # Hand-edited event catalog (Historic Pauper Challenge, etc.)
 ├── textual_log_viewer.py # Enhanced log browser with statistics
 ├── mtga-test-logs/      # Real MTGA log files for testing
 ├── test_*.py            # Test files for each component
@@ -313,7 +351,7 @@ The core TUI application is fully functional and ready for daily use by MTG Aren
 | 2025-08-11 | 15min | Configuration Screen Bug Fix | ✅ Fixed Pydantic object access in ConfigurationScreen - replaced dict.get() with attribute access |
 | 2025-08-12 | 1h 30min | Boss Fight Indicators, Goal System, Stats Editing, BO1/BO3 Support, Timer Improvements | ✅ Manual TUI enhancements, format switching, real-time timers, keybinding reorganization |
 | 2025-08-13 | 1h 15min | Advanced Timer Systems, Milestone Celebrations, Dual Time Tracking | ✅ Game timer, pause/resume, milestone toasts, dual time tracking, error fixes |
-| 2026-07-13 | TBD | Docs Cleanup, Test Suite Hardening (real assertions), Parser Bug Fixes, black/flake8, GitHub Actions CI | ✅ Removed stale prompt-logging instructions; converted print-only test scripts into real pytest tests; fixed a real event-type corruption bug in the log parser; added lint tooling and CI |
+| 2026-07-13 | TBD | Docs Cleanup, Test Suite Hardening (real assertions), Parser Bug Fixes, black/flake8, GitHub Actions CI, Event Mode (Historic Pauper Challenge) | ✅ Removed stale prompt-logging instructions; converted print-only test scripts into real pytest tests; fixed a real event-type corruption bug in the log parser; added lint tooling and CI; added a parallel event/run tracking system (win/loss-capped runs, prize tables, milestones, profit calc) with its own models, state/data managers, and a new TUI screen, verified end-to-end via Textual's headless pilot harness |
 
 ### Session Metrics
 - **Total Development Time**: 5h 52min+

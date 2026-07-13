@@ -1,0 +1,31 @@
+{
+  "events": [
+    {
+      "event_id": "historic_pauper_challenge",
+      "name": "Historic Pauper Challenge",
+      "format": "Best of One",
+      "win_cap": 7,
+      "loss_cap": 2,
+      "entry_cost_gold": 5000,
+      "entry_cost_gems": 1000,
+      "start_date": null,
+      "end_date": null,
+      "prize_table": [
+        {"wins": 0, "gems": 100, "packs": 0},
+        {"wins": 1, "gems": 150, "packs": 0},
+        {"wins": 2, "gems": 300, "packs": 1},
+        {"wins": 3, "gems": 500, "packs": 2},
+        {"wins": 4, "gems": 700, "packs": 4},
+        {"wins": 5, "gems": 1000, "packs": 6},
+        {"wins": 6, "gems": 1200, "packs": 8},
+        {"wins": 7, "gems": 1500, "packs": 10}
+      ],
+      "milestones": [
+        {"name": "Winning Run", "min_wins": 3},
+        {"name": "Free Run", "min_wins": 5},
+        {"name": "Profit Run", "min_wins": 6},
+        {"name": "Trophy", "min_wins": 7}
+      ]
+    }
+  ]
+}

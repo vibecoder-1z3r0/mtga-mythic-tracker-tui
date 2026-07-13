@@ -10,6 +10,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, List
 
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
 from textual.widgets import (
@@ -22,7 +23,7 @@ from textual.widgets import (
     Input,
     Select,
 )
-from textual.screen import ModalScreen
+from textual.screen import ModalScreen, Screen
 from textual.binding import Binding
 
 # Add src to path for imports
@@ -31,9 +32,21 @@ sys.path.insert(0, str(Path(__file__).parent))
 try:
     from src.config.settings import config_manager
     from src.core.state_manager import StateManager
+    from src.core.event_state_manager import EventStateManager
+    from src.core.event_data_manager import EventDataManager
     from src.models.session import Session  # Changed from SessionTracker
     from src.models.rank import Rank
     from src.models.game import Game, GameResult
+    from src.models.event import (
+        EntryCurrency,
+        EventDefinition,
+        EventGame,
+        EventGameResult,
+        EventRun,
+        EventRunStatus,
+        default_catalog_path,
+        load_event_catalog,
+    )
     from textual_log_viewer import MTGALogParser as EnhancedLogParser
 except ImportError as e:
     print(f"Import error: {e}")
@@ -398,6 +411,322 @@ class ConfigurationScreen(ModalScreen):
         self.query_one("#autosave-select", Select).value = "Enabled"
 
 
+class EventRunPanel(Static):
+    """Widget displaying the current event run: win/loss pips, deck, prize."""
+
+    def __init__(self, event: EventDefinition):
+        super().__init__()
+        self.event = event
+        self.run: Optional[EventRun] = None
+
+    def compose(self) -> ComposeResult:
+        yield Label("Current Run", classes="section-title")
+        yield Static(self._build_display(), id="run-display")
+
+    def _build_display(self) -> Text:
+        text = Text()
+        if not self.run:
+            text.append("No active run. Press [N] to start a new run.")
+            return text
+
+        text.append(f"Deck: {self.run.player_deck or 'Unknown'}\n")
+
+        text.append("Wins:   ")
+        for i in range(self.event.win_cap):
+            if i < self.run.wins:
+                text.append("[██]", style="bold gold1")
+            else:
+                text.append("[  ]", style="dim")
+        text.append("\n")
+
+        text.append("Losses: ")
+        for i in range(self.event.loss_cap):
+            if i < self.run.losses:
+                text.append("[xx]", style="bold red")
+            else:
+                text.append("[  ]", style="dim")
+        text.append("\n\n")
+
+        text.append(f"Record: {self.run.wins}-{self.run.losses}\n")
+        prize = self.run.prize(self.event)
+        text.append(f"Prize so far: {prize.gems} gems, {prize.packs} packs\n")
+
+        profit = self.run.net_profit_gems(self.event)
+        if profit is not None:
+            sign = "+" if profit >= 0 else ""
+            text.append(f"Net profit: {sign}{profit} gems\n")
+
+        milestone = self.run.highest_milestone(self.event)
+        text.append(f"Milestone: {milestone.name if milestone else 'None yet'}\n")
+
+        if self.run.status == EventRunStatus.ENDED:
+            text.append("Run complete!\n", style="bold green")
+
+        return text
+
+    def update_run(self, run: Optional[EventRun]) -> None:
+        self.run = run
+        display = self.query_one("#run-display", Static)
+        display.update(self._build_display())
+
+
+class EventSessionPanel(Static):
+    """Widget displaying current-session event totals."""
+
+    def __init__(self, event: EventDefinition):
+        super().__init__()
+        self.event = event
+        self.session = None
+
+    def compose(self) -> ComposeResult:
+        yield Label("Session Totals", classes="section-title")
+        yield Static(self._format_display(), id="event-session-display")
+
+    def _format_display(self) -> str:
+        if not self.session:
+            return "No active session"
+
+        prize = self.session.total_prize(self.event)
+        counts = self.session.milestone_counts(self.event)
+        counts_str = ", ".join(f"{name}: {count}" for name, count in counts.items())
+
+        return (
+            f"Runs played: {len(self.session.completed_runs())}\n"
+            f"Record: {self.session.total_wins()}-{self.session.total_losses()}\n"
+            f"Prize: {prize.gems} gems, {prize.packs} packs\n"
+            f"Milestones: {counts_str}"
+        )
+
+    def update_session(self, session) -> None:
+        self.session = session
+        display = self.query_one("#event-session-display", Static)
+        display.update(self._format_display())
+
+
+class EventOverallPanel(Static):
+    """Widget displaying lifetime totals for this event plus a grand total
+    across every event ever played."""
+
+    def __init__(self, event: EventDefinition):
+        super().__init__()
+        self.event = event
+        self.stats = None
+        self.grand_total = None
+
+    def compose(self) -> ComposeResult:
+        yield Label("Overall Totals", classes="section-title")
+        yield Static(self._format_display(), id="event-overall-display")
+
+    def _format_display(self) -> str:
+        if not self.stats:
+            return "No history yet"
+
+        counts_str = ", ".join(
+            f"{name}: {count}" for name, count in self.stats["milestone_counts"].items()
+        )
+        grand = self.grand_total
+        grand_str = f"{grand.gems} gems, {grand.packs} packs" if grand else "0 gems, 0 packs"
+
+        return (
+            f"Lifetime ({self.event.name}):\n"
+            f"  Runs played: {self.stats['runs_played']}\n"
+            f"  Record: {self.stats['wins']}-{self.stats['losses']}\n"
+            f"  Prize: {self.stats['prize'].gems} gems, {self.stats['prize'].packs} packs\n"
+            f"  Milestones: {counts_str}\n\n"
+            f"Grand total (all events): {grand_str}"
+        )
+
+    def update_stats(self, stats, grand_total) -> None:
+        self.stats = stats
+        self.grand_total = grand_total
+        display = self.query_one("#event-overall-display", Static)
+        display.update(self._format_display())
+
+
+class EventScreen(Screen):
+    """Event mode screen: tracks run-based events like the Historic Pauper
+    Challenge (win/loss caps and a fixed prize table) alongside the ranked
+    ladder tracking on the main screen."""
+
+    BINDINGS = [
+        Binding("escape", "back", "Back"),
+        Binding("n", "start_run", "New Run"),
+        Binding("w", "record_win", "Win"),
+        Binding("l", "record_loss", "Loss"),
+        Binding("ctrl+e", "end_event_session", "End Session"),
+    ]
+
+    CSS = """
+    EventScreen #event-left-panel {
+        width: 1fr;
+        border: solid $primary;
+        margin-right: 1;
+    }
+
+    EventScreen #event-right-panel {
+        width: 1fr;
+        border: solid $primary;
+    }
+
+    EventScreen #event-run-widget {
+        height: 1fr;
+        border: solid $secondary;
+        margin-bottom: 1;
+    }
+
+    EventScreen #event-inputs {
+        height: 5;
+        border: solid $secondary;
+    }
+
+    EventScreen #event-controls {
+        height: 3;
+        margin-bottom: 1;
+    }
+
+    EventScreen #event-session-widget {
+        height: 1fr;
+        border: solid $secondary;
+        margin-bottom: 1;
+    }
+
+    EventScreen #event-overall-widget {
+        height: 1fr;
+        border: solid $secondary;
+    }
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.catalog: List[EventDefinition] = load_event_catalog(default_catalog_path())
+        self.event: Optional[EventDefinition] = self.catalog[0] if self.catalog else None
+        self.event_state_manager = EventStateManager()
+        self.event_data_manager = EventDataManager()
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+
+        if not self.event:
+            yield Static("No events configured. Add an entry to events.json.")
+            yield Footer()
+            return
+
+        with Container():
+            with Horizontal():
+                with Vertical(id="event-left-panel"):
+                    yield EventRunPanel(self.event).add_class("event-run-widget").add_class(
+                        "run-panel"
+                    )
+                    with Horizontal(id="event-inputs"):
+                        yield Input(placeholder="Opponent deck", id="opponent-deck-input")
+                        yield Input(placeholder="Notes", id="notes-input")
+
+                with Vertical(id="event-right-panel"):
+                    yield EventSessionPanel(self.event).add_class("event-session-widget")
+                    yield EventOverallPanel(self.event).add_class("event-overall-widget")
+
+            with Horizontal(id="event-controls"):
+                yield Button("New Run", id="start-run-btn", variant="primary")
+                yield Button("Win", id="win-btn", variant="success")
+                yield Button("Loss", id="loss-btn", variant="error")
+                yield Button("End Session", id="end-event-session-btn", variant="warning")
+                yield Button("Back", id="event-back-btn", variant="default")
+
+        yield Footer()
+
+    def on_mount(self) -> None:
+        """Start a session for this event on mount and refresh displays."""
+        if not self.event:
+            return
+        self.session = self.event_state_manager.start_session(self.event.event_id)
+        self._refresh()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Buttons mirror the keybindings, since a focused Input widget
+        swallows single-letter keystrokes as text instead of triggering
+        bindings."""
+        if event.button.id == "start-run-btn":
+            self.action_start_run()
+        elif event.button.id == "win-btn":
+            self.action_record_win()
+        elif event.button.id == "loss-btn":
+            self.action_record_loss()
+        elif event.button.id == "end-event-session-btn":
+            self.action_end_event_session()
+        elif event.button.id == "event-back-btn":
+            self.action_back()
+
+    def action_back(self) -> None:
+        """Return to the main ranked-tracking screen."""
+        self.app.pop_screen()
+
+    def action_start_run(self) -> None:
+        """Start a new run within the current session."""
+        if not self.event:
+            return
+        if self.session.current_run() is not None:
+            self.notify("Current run hasn't ended yet!", severity="warning")
+            return
+
+        deck_input = self.query_one("#opponent-deck-input", Input)
+        run = EventRun(
+            run_id=f"run_{len(self.session.runs) + 1}",
+            event_id=self.event.event_id,
+            entry_currency=EntryCurrency.GEMS,
+        )
+        self.event_state_manager.start_run(run)
+        deck_input.value = ""
+        self._refresh()
+        self.notify("New run started!", severity="success")
+
+    def action_record_win(self) -> None:
+        self._record_result(EventGameResult.WIN)
+
+    def action_record_loss(self) -> None:
+        self._record_result(EventGameResult.LOSS)
+
+    def _record_result(self, result: EventGameResult) -> None:
+        if not self.event:
+            return
+        if not self.session.current_run():
+            self.notify("No active run! Press [N] to start one.", severity="warning")
+            return
+
+        opponent_deck = self.query_one("#opponent-deck-input", Input).value
+        notes = self.query_one("#notes-input", Input).value
+
+        game = EventGame(result=result, opponent_deck=opponent_deck or None, notes=notes)
+        self.event_state_manager.add_game(game, self.event)
+
+        self.query_one("#notes-input", Input).value = ""
+        self._refresh()
+
+    def action_end_event_session(self) -> None:
+        """End the current event session."""
+        if not self.event:
+            return
+        self.event_state_manager.end_session()
+        self.session = self.event_state_manager.start_session(self.event.event_id)
+        self._refresh()
+        self.notify("Session ended!", severity="success")
+
+    def _refresh(self) -> None:
+        """Refresh all display panels."""
+        if not self.event:
+            return
+
+        run_panel = self.query_one(EventRunPanel)
+        run_panel.update_run(self.session.current_run())
+
+        session_panel = self.query_one(EventSessionPanel)
+        session_panel.update_session(self.session)
+
+        overall_panel = self.query_one(EventOverallPanel)
+        stats = self.event_data_manager.get_overall_stats(self.event)
+        grand_total = self.event_data_manager.get_grand_total(self.catalog)
+        overall_panel.update_stats(stats, grand_total)
+
+
 class MTGASessionTrackerApp(App):
     """Main MTGA Session Tracker Application."""
 
@@ -458,6 +787,7 @@ class MTGASessionTrackerApp(App):
         Binding("f1", "show_help", "Help"),
         Binding("ctrl+l", "show_logs", "Show Logs"),
         Binding("c", "show_settings", "Settings"),
+        Binding("v", "show_event_mode", "Event Mode"),
     ]
 
     TITLE = "MTGA Mythic TUI Session Tracker"
@@ -473,6 +803,7 @@ class MTGASessionTrackerApp(App):
   N           Add note to current game
   Ctrl+L      Show log viewer
   C           Open settings
+  V           Event mode (Historic Pauper Challenge, etc.)
   F1          Show this help
   Ctrl+Q      Quit
 
@@ -603,6 +934,10 @@ class MTGASessionTrackerApp(App):
         """Show configuration screen."""
         config_screen = ConfigurationScreen(self.config)
         self.push_screen(config_screen)
+
+    def action_show_event_mode(self):
+        """Show the event-mode tracking screen."""
+        self.push_screen(EventScreen())
 
     def action_show_help(self):
         """Show help information."""

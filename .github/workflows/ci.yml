@@ -29,4 +29,4 @@ jobs:
         run: flake8 .
 
       - name: Run tests (pytest)
-        run: pytest test_models.py test_config.py test_state.py test_parser.py test_data.py -v
+        run: pytest test_models.py test_config.py test_state.py test_parser.py test_data.py test_event_models.py -v
