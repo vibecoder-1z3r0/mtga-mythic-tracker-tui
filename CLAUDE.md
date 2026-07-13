@@ -129,6 +129,22 @@ from both.
 GitHub Actions (`.github/workflows/ci.yml`) runs `black --check`, `flake8`,
 and the pytest suite on every push and pull request against `main`.
 
+### Visual Regression (SVG Snapshots)
+`test_snapshots.py` uses `pytest-textual-snapshot` to render `main_tui.py`
+(both the ranked screen and the event-mode screen) to SVG and compare
+against committed "golden" files in `__snapshots__/test_snapshots/`. This
+is what would have caught the "did you change the colorization?" question
+automatically — any layout, text, or color change fails CI.
+```bash
+# Run snapshot checks (same as CI)
+pytest test_snapshots.py -v
+
+# After an intentional visual change, regenerate and commit the new goldens
+pytest test_snapshots.py --snapshot-update
+```
+On a mismatch, CI uploads `snapshot_report.html` as a downloadable
+workflow artifact showing an old/new/diff view.
+
 ### Real Log Analysis Tools
 ```bash
 # Enhanced log viewer with parsing statistics

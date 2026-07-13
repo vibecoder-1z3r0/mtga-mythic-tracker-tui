@@ -30,3 +30,14 @@ jobs:
 
       - name: Run tests (pytest)
         run: pytest test_models.py test_config.py test_state.py test_parser.py test_data.py test_event_models.py -v
+
+      - name: Run TUI snapshot tests
+        run: pytest test_snapshots.py -v
+
+      - name: Upload snapshot failure report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapshot-report
+          path: snapshot_report.html
+          if-no-files-found: ignore

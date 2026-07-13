@@ -51,6 +51,10 @@ coverage.xml
 .pytest_cache/
 cover/
 
+# pytest-textual-snapshot failure report (regenerated per run; the
+# committed golden files live in __snapshots__/ and are NOT ignored)
+snapshot_report.html
+
 # Translations
 *.mo
 *.pot

@@ -442,7 +442,7 @@ class EventRunPanel(Static):
         text.append("Losses: ")
         for i in range(self.event.loss_cap):
             if i < self.run.losses:
-                text.append("[xx]", style="bold red")
+                text.append("[▓▓]", style="bold red")
             else:
                 text.append("[  ]", style="dim")
         text.append("\n\n")
