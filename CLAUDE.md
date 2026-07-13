@@ -111,8 +111,6 @@ mythic-tracker-tui/
 ├── test_*.py            # Test files for each component
 ├── configure_log_path.py # MTGA log path configuration
 ├── analyze_*.py         # Log analysis tools
-├── prompt_logger.py     # Development prompt logging
-├── prompts.log          # All prompts saved here
 ├── requirements.txt     # Python dependencies
 └── CLAUDE.md            # This documentation
 ```
@@ -299,13 +297,3 @@ The core TUI application is fully functional and ready for daily use by MTG Aren
 - Add completed session duration and accomplishments after each coding session
 - Track both development time and feature velocity
 - Note any architectural decisions or technical debt
-
-## Prompt Logging
-All prompts are automatically logged to `prompts.log` for development tracking.
-
-### Automatic Prompt Logging Instruction
-**IMPORTANT**: For every user prompt received, immediately use the prompt logger tool:
-```bash
-python3 prompt_logger.py "user prompt text here"
-```
-This ensures all development conversations are preserved for session tracking and context.
