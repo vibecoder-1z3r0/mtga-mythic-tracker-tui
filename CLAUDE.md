@@ -17,15 +17,26 @@ Ranked ladder tracking (tiers/pips) and event tracking (win/loss-capped runs
 with a fixed prize table) are different enough shapes that events get their
 own parallel model/manager stack rather than being bolted onto Session/Rank:
 
-- `src/models/event.py` — `EventDefinition` (win/loss caps, entry cost,
-  prize table, milestone thresholds), `EventRun` (a single attempt, ends at
-  win_cap wins or loss_cap losses), `EventSession` (a sitting containing one
-  or more runs), `EventAppState` (crash-recovery, parallel to `AppState`).
+- `src/models/event.py` — `EventDefinition` (win/loss caps, entry options,
+  prize table, milestone thresholds), `EntryOption` (one way to pay entry —
+  currency name + amount + optional explicit `gems_equivalent`), `EventRun`
+  (a single attempt, ends at win_cap wins or loss_cap losses), `EventSession`
+  (a sitting containing one or more runs), `EventAppState` (crash-recovery,
+  parallel to `AppState`).
 - `events.json` (repo root) — hand-edited catalog of event definitions, one
   entry per event by `event_id`. Supports multiple concurrently-running
-  events with independent win/loss caps and prize tables. A TUI editor for
-  this catalog is a possible future enhancement; for now it's edited by
-  hand. Fill in `start_date`/`end_date` once known.
+  events with independent win/loss caps and prize tables. Entry cost is an
+  `entry_options` array rather than fixed gold/gems fields, so an event can
+  offer any number of ways to pay — gold, gems, or event-specific tokens
+  (Jumpstart Boosters, draft tokens, etc.):
+  ```json
+  "entry_options": [
+    {"currency": "Gold", "amount": 5000},
+    {"currency": "Gems", "amount": 1000}
+  ]
+  ```
+  A TUI editor for this catalog is a possible future enhancement; for now
+  it's edited by hand. Fill in `start_date`/`end_date` once known.
 - `src/core/event_state_manager.py` / `src/core/event_data_manager.py` —
   parallel to `StateManager`/`DataManager`: persist the active session,
   and aggregate lifetime stats both per-event (`get_overall_stats`) and as
@@ -37,8 +48,16 @@ own parallel model/manager stack rather than being bolted onto Session/Rank:
   `highest_milestone()` picks the single highest threshold met, while
   `EventSession.milestone_counts()` tallies cumulatively (a 7-win run
   counts toward "3+ wins", "5+ wins", etc. all at once).
-- Net profit (`EventRun.net_profit_gems()`) only nets cleanly when the
-  entry fee was paid in gems (gold has no fixed gems conversion rate).
+- Net profit (`EventRun.net_profit_gems()`, via
+  `EventDefinition.gems_equivalent_for()`) resolves a gems-equivalent value
+  for whatever currency the entry was paid in: an option's own explicit
+  `gems_equivalent` first, then its own amount if it *is* Gems, then falls
+  back to the event's own Gems entry option (assuming all entry options are
+  priced as roughly equal value). Returns `None` only if none of those
+  resolve (e.g. a non-gems entry on an event with no Gems option at all).
+- `EventRun.entry_currency` is a free-form string naming which
+  `EntryOption.currency` was used, not a closed enum, since new events can
+  introduce arbitrary token types without a model change.
 - In the TUI (`main_tui.py`), press **V** to open `EventScreen`, a full
   screen (not a modal) showing the current run's win/loss pips in
   gold/red, session totals, and overall totals side by side. Win/Loss/New
@@ -368,6 +387,7 @@ The core TUI application is fully functional and ready for daily use by MTG Aren
 | 2025-08-12 | 1h 30min | Boss Fight Indicators, Goal System, Stats Editing, BO1/BO3 Support, Timer Improvements | ✅ Manual TUI enhancements, format switching, real-time timers, keybinding reorganization |
 | 2025-08-13 | 1h 15min | Advanced Timer Systems, Milestone Celebrations, Dual Time Tracking | ✅ Game timer, pause/resume, milestone toasts, dual time tracking, error fixes |
 | 2026-07-13 | TBD | Docs Cleanup, Test Suite Hardening (real assertions), Parser Bug Fixes, black/flake8, GitHub Actions CI, Event Mode (Historic Pauper Challenge), Ranked Session Bug Fixes | ✅ Removed stale prompt-logging instructions; converted print-only test scripts into real pytest tests; fixed a real event-type corruption bug in the log parser; added lint tooling and CI; added a parallel event/run tracking system (win/loss-capped runs, prize tables, milestones, profit calc) with its own models, state/data managers, and a new TUI screen, verified end-to-end via Textual's headless pilot harness; fixed main_tui.py's ranked Start/Pause/End Session flow, which never matched the real Session/StateManager/AppState APIs (wrong constructor args, wrong method signatures, `current_session` vs `active_session`, and an `AppState.has_active_session()` misuse that broke pause/resume) |
+| 2026-07-14 | TBD | Event Mode ported to manual_tui.py, SVG snapshot CI, Entry-Cost Redesign | ✅ Ported the event tracker to the standalone `manual/manual_tui.py` app (dataclass mirror of `src/models/event.py`, own `events.json`, `EventRunPanel`/`EventStatsPanel`, V/U keybindings); fixed a `gold1` color-name bug that silently failed to render gold pips in both apps (switched to explicit `rgb(255,215,0)`); added `pytest-textual-snapshot` SVG regression tests to CI for both the ranked and event screens; redesigned entry cost from fixed `entry_cost_gold`/`entry_cost_gems` fields into an open-ended `entry_options` array (`EntryOption`) so events can charge gold, gems, or arbitrary tokens (draft/Jumpstart), with a gems-equivalent fallback chain for net-profit calc — migrated both `events.json` catalogs, both `main_tui.py`/`manual_tui.py` UIs, and both test suites (plus a new token-entry test) to match |
 
 ### Session Metrics
 - **Total Development Time**: 5h 52min+

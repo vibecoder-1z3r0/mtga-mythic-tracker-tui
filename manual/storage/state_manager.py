@@ -13,7 +13,6 @@ from dataclasses import asdict
 
 from models import FormatType, RankTier, ManualRank, CompletedSession, SessionStats, AppData
 from models import (
-    EntryCurrency,
     EventGame,
     EventGameResult,
     EventRun,
@@ -254,7 +253,8 @@ class StateManager:
         run_dict = dict(run_dict)
         run_dict['games'] = [self._reconstruct_event_game(g) for g in run_dict.get('games', [])]
         run_dict['status'] = EventRunStatus(run_dict['status'])
-        run_dict['entry_currency'] = EntryCurrency(run_dict['entry_currency'])
+        # entry_currency is now a plain free-form string (gold/gems/tokens),
+        # no enum reconstruction needed.
         return EventRun(**run_dict)
 
     def _reconstruct_event_stats(self, stats_dict: dict) -> EventStats:

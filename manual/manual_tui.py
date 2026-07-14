@@ -25,7 +25,6 @@ from textual.message import Message
 # Import models from our new modules
 from models import FormatType, RankTier, ManualRank, CompletedSession, SessionStats, AppData
 from models import (
-    EntryCurrency,
     EventDefinition,
     EventGame,
     EventGameResult,
@@ -144,17 +143,12 @@ class TopPanel(Static):
         else:
             season_content = f"🎮 {event.name} ({event.format})"
 
-            if run:
-                if run.entry_currency == EntryCurrency.GEMS:
-                    format_content = f"💰 Entry: {event.entry_cost_gems} gems"
-                else:
-                    format_content = f"💰 Entry: {event.entry_cost_gold} gold"
+            if run and run.entry_currency:
+                option = event.get_entry_option(run.entry_currency)
+                amount = option.amount if option else "?"
+                format_content = f"💰 Entry: {amount} {run.entry_currency}"
             else:
-                costs = []
-                if event.entry_cost_gems is not None:
-                    costs.append(f"{event.entry_cost_gems} gems")
-                if event.entry_cost_gold is not None:
-                    costs.append(f"{event.entry_cost_gold} gold")
+                costs = [f"{opt.amount} {opt.currency}" for opt in event.entry_options]
                 format_content = f"💰 Entry: {' / '.join(costs)}" if costs else "💰 Entry: --"
 
             if run:
@@ -1037,6 +1031,10 @@ class EventRunPanel(Static):
         )
 
         lines.append(f"Deck: {run.player_deck or 'Unknown'}")
+        if run.entry_currency:
+            option = event.get_entry_option(run.entry_currency)
+            amount = option.amount if option else "?"
+            lines.append(f"Entry: {amount} {run.entry_currency}")
         lines.append(f"Wins:   {win_bars}")
         lines.append(f"Losses: {loss_bars}")
         lines.append("")
@@ -2765,10 +2763,26 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
             return
 
         run_id = f"run_{stats.alltime_runs_played + 1}"
-        run = EventRun(run_id=run_id, event_id=event.event_id, entry_currency=EntryCurrency.GEMS)
+        run = EventRun(
+            run_id=run_id, event_id=event.event_id, entry_currency=self._default_entry_currency(event)
+        )
         stats.start_run(run)
         self.refresh_panels()
         self.notify("New run started!", severity="success")
+
+    def _default_entry_currency(self, event: EventDefinition) -> Optional[str]:
+        """Pick a default entry currency for a new run: prefer Gems, else
+        this event's first configured entry option.
+
+        TODO: there's no UI picker for this yet (e.g. if an event only
+        offers Gold or a token entry) - this always defaults silently.
+        """
+        if not event.entry_options:
+            return None
+        gems_option = event.get_entry_option("Gems")
+        if gems_option:
+            return gems_option.currency
+        return event.entry_options[0].currency
 
     def _get_current_event_definition(self) -> Optional[EventDefinition]:
         """The EventDefinition matching the currently-tracked event."""

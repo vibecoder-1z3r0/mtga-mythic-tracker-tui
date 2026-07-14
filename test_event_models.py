@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from src.models.event import (
-    EntryCurrency,
+    EntryOption,
     EventGame,
     EventGameResult,
     EventRun,
@@ -42,8 +42,11 @@ def test_load_event_catalog():
     assert event.name == "Historic Pauper Challenge"
     assert event.win_cap == 7
     assert event.loss_cap == 2
-    assert event.entry_cost_gold == 5000
-    assert event.entry_cost_gems == 1000
+    gold_option = event.get_entry_option("Gold")
+    gems_option = event.get_entry_option("Gems")
+    assert gold_option.amount == 5000
+    assert gems_option.amount == 1000
+    assert event.gems_price() == 1000
     assert len(event.prize_table) == 8
     assert len(event.milestones) == 4
 
@@ -78,7 +81,7 @@ def test_milestones():
 def test_event_run_completes_at_win_cap():
     """Test that a run ends automatically once win_cap is reached."""
     event = load_test_event()
-    run = EventRun(run_id="r1", event_id=event.event_id, entry_currency=EntryCurrency.GEMS)
+    run = EventRun(run_id="r1", event_id=event.event_id, entry_currency="Gems")
 
     for _ in range(6):
         added = run.add_game(EventGame(result=EventGameResult.WIN), event)
@@ -100,7 +103,7 @@ def test_event_run_completes_at_win_cap():
 def test_event_run_completes_at_loss_cap():
     """Test that a run ends automatically once loss_cap is reached."""
     event = load_test_event()
-    run = EventRun(run_id="r1", event_id=event.event_id, entry_currency=EntryCurrency.GEMS)
+    run = EventRun(run_id="r1", event_id=event.event_id, entry_currency="Gems")
 
     run.add_game(EventGame(result=EventGameResult.WIN), event)
     run.add_game(EventGame(result=EventGameResult.LOSS), event)
@@ -115,7 +118,7 @@ def test_event_run_completes_at_loss_cap():
 def test_event_run_prize_and_profit():
     """Test prize and net-profit calculation for a completed run."""
     event = load_test_event()
-    run = EventRun(run_id="r1", event_id=event.event_id, entry_currency=EntryCurrency.GEMS)
+    run = EventRun(run_id="r1", event_id=event.event_id, entry_currency="Gems")
     for _ in range(6):
         run.add_game(EventGame(result=EventGameResult.WIN), event)
     run.add_game(EventGame(result=EventGameResult.LOSS), event)
@@ -130,14 +133,35 @@ def test_event_run_prize_and_profit():
     assert run.highest_milestone(event).name == "Profit Run"
 
 
-def test_event_run_profit_none_when_paid_in_gold():
-    """Test that net profit is undefined when the entry was paid in gold."""
+def test_event_run_profit_when_paid_in_gold_uses_gems_price():
+    """Test that a gold-paid entry falls back to the event's Gems price for
+    net-profit calc, since gold has no fixed gems conversion rate of its own."""
     event = load_test_event()
-    run = EventRun(run_id="r1", event_id=event.event_id, entry_currency=EntryCurrency.GOLD)
+    run = EventRun(run_id="r1", event_id=event.event_id, entry_currency="Gold")
     for _ in range(7):
         run.add_game(EventGame(result=EventGameResult.WIN), event)
 
-    assert run.net_profit_gems(event) is None
+    # Falls back to the event's Gems entry option (1000) as no explicit
+    # gems_equivalent was set on the Gold option.
+    assert run.net_profit_gems(event) == 500
+
+
+def test_event_run_profit_with_token_entry():
+    """Test that a token-based entry option falls back to the event's Gems
+    price for net-profit calc when it has no explicit gems_equivalent."""
+    event = load_test_event()
+    event.entry_options.append(EntryOption(currency="Jumpstart Token", amount=1))
+    run = EventRun(run_id="r1", event_id=event.event_id, entry_currency="Jumpstart Token")
+    for _ in range(3):
+        run.add_game(EventGame(result=EventGameResult.WIN), event)
+    run.add_game(EventGame(result=EventGameResult.LOSS), event)
+    run.add_game(EventGame(result=EventGameResult.LOSS), event)
+
+    assert run.wins == 3
+    assert run.prize(event).gems == 500
+    # Falls back to the event's Gems entry option (1000) as no explicit
+    # gems_equivalent was set on the token option.
+    assert run.net_profit_gems(event) == -500
 
 
 def test_event_session_current_run_and_totals():
@@ -145,7 +169,7 @@ def test_event_session_current_run_and_totals():
     event = load_test_event()
     session = EventSession(session_id="s1", event_id=event.event_id)
 
-    run1 = EventRun(run_id="r1", event_id=event.event_id, entry_currency=EntryCurrency.GEMS)
+    run1 = EventRun(run_id="r1", event_id=event.event_id, entry_currency="Gems")
     session.start_run(run1)
     assert session.current_run() is run1
 
@@ -153,7 +177,7 @@ def test_event_session_current_run_and_totals():
         run1.add_game(EventGame(result=EventGameResult.WIN), event)
     assert session.current_run() is None  # run1 ended at win_cap
 
-    run2 = EventRun(run_id="r2", event_id=event.event_id, entry_currency=EntryCurrency.GEMS)
+    run2 = EventRun(run_id="r2", event_id=event.event_id, entry_currency="Gems")
     session.start_run(run2)
     run2.add_game(EventGame(result=EventGameResult.LOSS), event)
     run2.add_game(EventGame(result=EventGameResult.LOSS), event)
@@ -184,7 +208,7 @@ def test_event_state_manager_lifecycle():
         session = manager.start_session(event.event_id)
         assert session.status.value == "Active"
 
-        run = EventRun(run_id="r1", event_id=event.event_id, entry_currency=EntryCurrency.GEMS)
+        run = EventRun(run_id="r1", event_id=event.event_id, entry_currency="Gems")
         assert manager.start_run(run) is True
 
         for _ in range(7):
@@ -210,7 +234,7 @@ def test_event_data_manager_overall_and_grand_total():
         # First sitting: a 7-win trophy run.
         manager = EventStateManager()
         manager.start_session(event.event_id)
-        run1 = EventRun(run_id="r1", event_id=event.event_id, entry_currency=EntryCurrency.GEMS)
+        run1 = EventRun(run_id="r1", event_id=event.event_id, entry_currency="Gems")
         manager.start_run(run1)
         for _ in range(7):
             manager.add_game(EventGame(result=EventGameResult.WIN), event)
@@ -219,7 +243,7 @@ def test_event_data_manager_overall_and_grand_total():
         # Second sitting: a 2-loss bust.
         manager2 = EventStateManager()
         manager2.start_session(event.event_id)
-        run2 = EventRun(run_id="r2", event_id=event.event_id, entry_currency=EntryCurrency.GEMS)
+        run2 = EventRun(run_id="r2", event_id=event.event_id, entry_currency="Gems")
         manager2.start_run(run2)
         manager2.add_game(EventGame(result=EventGameResult.LOSS), event)
         manager2.add_game(EventGame(result=EventGameResult.LOSS), event)
@@ -247,7 +271,8 @@ def main():
     test_event_run_completes_at_win_cap()
     test_event_run_completes_at_loss_cap()
     test_event_run_prize_and_profit()
-    test_event_run_profit_none_when_paid_in_gold()
+    test_event_run_profit_when_paid_in_gold_uses_gems_price()
+    test_event_run_profit_with_token_entry()
     test_event_session_current_run_and_totals()
     test_event_state_manager_lifecycle()
     test_event_data_manager_overall_and_grand_total()

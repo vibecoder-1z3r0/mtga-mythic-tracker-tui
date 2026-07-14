@@ -37,7 +37,6 @@ try:
     from src.models.rank import Rank, FormatType
     from src.models.game import Game, GameResult
     from src.models.event import (
-        EntryCurrency,
         EventDefinition,
         EventGame,
         EventGameResult,
@@ -430,6 +429,10 @@ class EventRunPanel(Static):
             return text
 
         text.append(f"Deck: {self.run.player_deck or 'Unknown'}\n")
+        if self.run.entry_currency:
+            entry_option = self.event.get_entry_option(self.run.entry_currency)
+            amount = entry_option.amount if entry_option else "?"
+            text.append(f"Entry: {amount} {self.run.entry_currency}\n")
 
         text.append("Wins:   ")
         for i in range(self.event.win_cap):
@@ -672,12 +675,26 @@ class EventScreen(Screen):
         run = EventRun(
             run_id=f"run_{len(self.session.runs) + 1}",
             event_id=self.event.event_id,
-            entry_currency=EntryCurrency.GEMS,
+            entry_currency=self._default_entry_currency(),
         )
         self.event_state_manager.start_run(run)
         deck_input.value = ""
         self._refresh()
         self.notify("New run started!", severity="success")
+
+    def _default_entry_currency(self) -> Optional[str]:
+        """Pick a default entry currency for a new run: prefer Gems, else
+        whatever this event's first configured entry option is.
+
+        TODO: there's no UI picker for this yet (e.g. if an event only
+        offers Gold or a token entry) - this always defaults silently.
+        """
+        if not self.event or not self.event.entry_options:
+            return None
+        gems_option = self.event.get_entry_option("Gems")
+        if gems_option:
+            return gems_option.currency
+        return self.event.entry_options[0].currency
 
     def action_record_win(self) -> None:
         self._record_result(EventGameResult.WIN)

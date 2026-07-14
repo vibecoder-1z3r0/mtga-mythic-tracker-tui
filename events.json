@@ -6,8 +6,10 @@
       "format": "Best of One",
       "win_cap": 7,
       "loss_cap": 2,
-      "entry_cost_gold": 5000,
-      "entry_cost_gems": 1000,
+      "entry_options": [
+        {"currency": "Gold", "amount": 5000},
+        {"currency": "Gems", "amount": 1000}
+      ],
       "start_date": null,
       "end_date": null,
       "prize_table": [

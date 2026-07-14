@@ -8,7 +8,7 @@ from .rank import FormatType, RankTier, ManualRank
 from .session import CompletedSession, SessionStats
 from .app_data import AppData
 from .event import (
-    EntryCurrency,
+    EntryOption,
     EventDefinition,
     EventGame,
     EventGameResult,
@@ -29,7 +29,7 @@ __all__ = [
     'CompletedSession',
     'SessionStats',
     'AppData',
-    'EntryCurrency',
+    'EntryOption',
     'EventDefinition',
     'EventGame',
     'EventGameResult',

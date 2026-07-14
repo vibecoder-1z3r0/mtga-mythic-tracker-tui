@@ -27,12 +27,16 @@ with win/loss-capped runs and a fixed prize table instead of tiers/pips.
 Kept fully standalone (dataclasses, no imports from the parent project's
 `src/`), matching this app's architecture:
 
-- `models/event.py` — `EventDefinition`, `EventRun`, `EventGame`,
-  `EventStats` as plain dataclasses (this app's convention, vs. the
-  pydantic models in the parent `src/models/event.py`).
+- `models/event.py` — `EventDefinition`, `EntryOption`, `EventRun`,
+  `EventGame`, `EventStats` as plain dataclasses (this app's convention, vs.
+  the pydantic models in the parent `src/models/event.py`).
 - `events.json` (this directory) — this app's own copy of the event
   catalog, so the app remains portable/standalone. Same catalog format
-  as the parent project.
+  as the parent project. Entry cost is an `entry_options` array (currency
+  name + amount, e.g. Gold/Gems/tokens) rather than fixed fields, so any
+  event can offer arbitrary entry methods; `EventRun.net_profit_gems()`
+  resolves a gems-equivalent value per option (explicit override, own
+  amount if Gems, else the event's own Gems option) for profit calc.
 - `EventStats` mirrors `SessionStats`'s session-vs-season split:
   `session_*` counters reset when you restart the event session (**R**
   in Event Mode), `alltime_*` counters never reset. Both are folded from

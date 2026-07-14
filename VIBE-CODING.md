@@ -221,5 +221,31 @@ Extremely productive session! We built a solid foundation with real MTGA log int
 Housekeeping session prompted by realizing the project's CI story was nonexistent and the "tests" weren't actually testing anything (they swallowed exceptions and always printed success). Tracing through the test logic surfaced two real, previously-silent bugs in the parser. The codebase is now in a state where a red CI run means something actually broke. Continued into building the event-mode tracker for an upcoming Historic Pauper Challenge; since the user couldn't test the TUI directly, verification leaned on Textual's `run_test()` pilot harness, which caught two more real bugs (session-ID collisions and an off-screen button layout) before they could reach production. Closed the loop by auditing the ranked session flow flagged during that work — it turned out to have never been updated after the models moved to pydantic, so Start Session was completely broken. Delivered SVG screenshots of the real running app (via the pilot harness) alongside the fixes, since the user couldn't see the TUI directly either.
 
 ---
-*Total Development Time: 5h 52min+*
+
+## Session 8: Manual TUI Event Mode, Snapshot CI, Entry-Options Redesign
+**Date**: July 14, 2026
+**Duration**: TBD
+**Status**: ✅ Complete
+
+### 🚀 Accomplishments
+- ✅ Diagnosed a "the mythic tracker looks different from the screenshots" report back to its actual cause: the root README's screenshot was of `manual/manual_tui.py`, a completely separate standalone app, not `main_tui.py` — confirmed both apps matter and both needed the event tracker
+- ✅ Ported the full event-mode tracking system to `manual/manual_tui.py`, mirroring the pydantic models in `src/models/event.py` as plain dataclasses in `manual/models/event.py` (this app's established convention — no cross-imports from the parent project)
+  - `manual/events.json`: this app's own standalone copy of the event catalog
+  - `EventRunPanel`/`EventStatsPanel` widgets, wired to **V** (toggle event mode) and **U** (start run), with **W**/**L** made context-sensitive between ranked and event views
+  - `manual/storage/state_manager.py` extended to persist `EventStats` in the same single JSON blob as everything else, per this app's "one big file" convention
+  - Verified end-to-end via Textual's pilot harness and SVG screenshots, since the user can't test interactively
+- ✅ Found and fixed a real color bug in both apps: `"gold1"` (an extended 256-color palette name) silently failed to render inside Textual `Static`/`Text` widgets, falling back to default grey — confirmed via direct SVG fill-color inspection, fixed by switching to explicit `rgb(255,215,0)` everywhere gold pips are drawn
+- ✅ Changed the loss-pip glyph from a plain `[xx]` to a dithered `[▓▓]` block (red) to visually match the win-pip block style
+- ✅ Added `pytest-textual-snapshot` SVG regression tests (`test_snapshots.py`) to CI for both apps' screens (ranked empty/active state, event mid-run) — this is what would have automatically caught the earlier "did the colors change?" question, since any layout/text/color diff now fails the build with a downloadable before/after/diff HTML report
+- ✅ Redesigned event entry cost from two fixed fields (`entry_cost_gold`/`entry_cost_gems` + a `gold_to_gems_rate`) into an open-ended `entry_options: List[EntryOption]` array, so an event can charge gold, gems, or arbitrary tokens (draft tokens, Jumpstart Boosters, etc.) without a model change — each `EntryOption` has a `currency`, `amount`, and optional explicit `gems_equivalent`; net-profit calc falls back from an explicit override → the option's own amount if it's Gems → the event's own Gems entry option
+  - Migrated both `events.json` catalogs (root and `manual/`) to the new array format
+  - Updated both `main_tui.py` and `manual/manual_tui.py` to display an "Entry: {amount} {currency}" line and default new runs to Gems (or the event's first configured option) — no picker UI yet if an event needs a different default, tracked as a follow-up
+  - Updated both `test_event_models.py` suites: dropped the removed `EntryCurrency` enum entirely, rewrote assertions against the new `get_entry_option()`/`gems_price()`/`gems_equivalent_for()` API, and added a new token-based-entry test proving the fallback chain resolves correctly for non-gold/gems currencies too
+  - Re-verified via pytest (37 tests + 10 manual-app tests, all green), black/flake8 clean, and a regenerated snapshot golden for the event screen's new entry line
+
+### 💭 Session Reflection
+Started by chasing down why the manual tracker "looked odd" compared to screenshots — turned out to be two genuinely different apps sharing a README. Once both were confirmed in scope, most of the session was mirroring work already proven out in `main_tui.py` into the standalone app, plus following the user's economics questions (how is a 5000-gold entry accounted for in gems?) through to their natural conclusion: rather than hardcoding a gold-to-gems rate, the entry-cost model needed to be an open array from the start, since future events may charge in tokens that don't convert to gems at all. Kept both apps' independent architecture intact throughout — no shared imports, every model and manager duplicated deliberately once per app's own conventions.
+
+---
+*Total Development Time: 5h 52min+ (Session 8 duration TBD)*
 *Next Session: TBD*

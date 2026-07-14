@@ -14,11 +14,18 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 
-class EntryCurrency(str, Enum):
-    """Currency an event entry fee was paid with."""
+@dataclass
+class EntryOption:
+    """One way to pay for entry into an event.
 
-    GOLD = "Gold"
-    GEMS = "Gems"
+    `currency` is a free-form label rather than a closed enum, since entry
+    can be paid with gold, gems, or event-specific tokens (Jumpstart
+    Boosters, Draft tokens, etc.) that vary per event.
+    """
+
+    currency: str
+    amount: int
+    gems_equivalent: Optional[float] = None  # explicit gems-equivalent value, if not derivable
 
 
 @dataclass
@@ -47,12 +54,42 @@ class EventDefinition:
     format: str = "Best of One"
     win_cap: int = 7
     loss_cap: int = 2
-    entry_cost_gold: Optional[int] = None
-    entry_cost_gems: Optional[int] = None
+    entry_options: List[EntryOption] = field(default_factory=list)
     prize_table: List[PrizeTier] = field(default_factory=list)
     milestones: List[MilestoneDefinition] = field(default_factory=list)
     start_date: Optional[str] = None
     end_date: Optional[str] = None
+
+    def get_entry_option(self, currency: str) -> Optional[EntryOption]:
+        """Look up an entry option by currency name (case-insensitive)."""
+        for option in self.entry_options:
+            if option.currency.lower() == currency.lower():
+                return option
+        return None
+
+    def gems_price(self) -> Optional[int]:
+        """The amount of the 'Gems' entry option, if this event has one."""
+        option = self.get_entry_option("Gems")
+        return option.amount if option else None
+
+    def gems_equivalent_for(self, currency: Optional[str]) -> Optional[float]:
+        """Gems-equivalent value of paying entry with the given currency.
+
+        Uses that option's explicit gems_equivalent if set, else its own
+        amount if it *is* Gems, else falls back to this event's Gems entry
+        option (assuming all entry options are priced as roughly equal
+        value). Returns None if nothing is resolvable.
+        """
+        if not currency:
+            return None
+        option = self.get_entry_option(currency)
+        if option is None:
+            return None
+        if option.gems_equivalent is not None:
+            return option.gems_equivalent
+        if option.currency.lower() == "gems":
+            return option.amount
+        return self.gems_price()
 
     def prize_for_wins(self, wins: int) -> PrizeTier:
         """Get the prize for a given number of wins (clamped to win_cap)."""
@@ -86,7 +123,15 @@ def load_event_catalog(path: Path) -> List[EventDefinition]:
         entry = dict(entry)
         prize_table = [PrizeTier(**tier) for tier in entry.pop("prize_table", [])]
         milestones = [MilestoneDefinition(**m) for m in entry.pop("milestones", [])]
-        events.append(EventDefinition(prize_table=prize_table, milestones=milestones, **entry))
+        entry_options = [EntryOption(**opt) for opt in entry.pop("entry_options", [])]
+        events.append(
+            EventDefinition(
+                prize_table=prize_table,
+                milestones=milestones,
+                entry_options=entry_options,
+                **entry,
+            )
+        )
     return events
 
 
@@ -125,7 +170,7 @@ class EventRun:
 
     run_id: str
     event_id: str
-    entry_currency: EntryCurrency = EntryCurrency.GEMS
+    entry_currency: Optional[str] = None
     start_time: datetime = field(default_factory=datetime.now)
     end_time: Optional[datetime] = None
     status: EventRunStatus = EventRunStatus.ACTIVE
@@ -163,14 +208,14 @@ class EventRun:
         return event.prize_for_wins(self.wins)
 
     def net_profit_gems(self, event: EventDefinition) -> Optional[int]:
-        """Net gems profit (prize gems minus entry cost).
-
-        Only meaningful when the entry fee was paid in gems, since gold has
-        no fixed conversion rate to gems. Returns None otherwise.
+        """Net gems profit (prize gems minus entry cost, in gems-equivalent
+        terms). Non-gems entries (gold, tokens) are converted via
+        event.gems_equivalent_for(). Returns None if not resolvable.
         """
-        if self.entry_currency != EntryCurrency.GEMS or event.entry_cost_gems is None:
+        entry_cost_gems_equiv = event.gems_equivalent_for(self.entry_currency)
+        if entry_cost_gems_equiv is None:
             return None
-        return self.prize(event).gems - event.entry_cost_gems
+        return round(self.prize(event).gems - entry_cost_gems_equiv)
 
     def highest_milestone(self, event: EventDefinition) -> Optional[MilestoneDefinition]:
         """The highest-threshold milestone this run has reached so far."""
