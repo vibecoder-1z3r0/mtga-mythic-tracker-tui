@@ -434,7 +434,7 @@ class EventRunPanel(Static):
         text.append("Wins:   ")
         for i in range(self.event.win_cap):
             if i < self.run.wins:
-                text.append("[██]", style="bold gold1")
+                text.append("[██]", style="bold rgb(255,215,0)")
             else:
                 text.append("[  ]", style="dim")
         text.append("\n")

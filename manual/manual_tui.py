@@ -97,32 +97,87 @@ class EditableText(Static):
         return self._input.value if self.is_editing else str(self._label.renderable)
 
 class TopPanel(Static):
-    """Top panel with season info, current status, and session overview."""
-    
-    def __init__(self, app_data: AppData):
+    """Top panel with season info, current status, and session overview
+    (ranked), or event/entry/run/milestone info (Event Mode)."""
+
+    def __init__(self, app_data: AppData, event_catalog: Optional[List[EventDefinition]] = None):
         super().__init__()
         self.app_data = app_data
-    
+        self.event_catalog = event_catalog or []
+
     def compose(self) -> ComposeResult:
         with Horizontal(classes="top-panel-layout"):
-            # Column 1 - Season countdown
+            # Column 1 - Season countdown (ranked) / Event name (event mode)
             yield Static("🕐 Season: Loading...", classes="top-season")
-            
-            # Column 2 - Format
+
+            # Column 2 - Format (ranked) / Entry cost (event mode)
             yield Static("📊 BO1", classes="top-format")
-            
-            # Column 3 - Bars remaining
+
+            # Column 3 - Bars remaining (ranked) / Run record (event mode)
             yield Static("🎯 BARS: --", classes="top-bars")
-            
-            # Column 4 - Current rank
+
+            # Column 4 - Current rank (ranked) / Milestone (event mode)
             yield Static("📍 Loading...", classes="top-rank")
-    
+
     def on_mount(self) -> None:
         """Update display when mounted."""
         self.update_display()
-    
+
     def update_display(self):
-        """Update top panel display."""
+        """Update top panel display for whichever view mode is active."""
+        if self.app_data.view_mode == "event":
+            self._update_event_display()
+        else:
+            self._update_ranked_display()
+
+    def _update_event_display(self):
+        """Update the top panel for Event Mode: event name, entry cost,
+        current run record, and highest milestone reached this run."""
+        event = _get_event_for_stats(self.app_data.event_stats, self.event_catalog)
+        run = self.app_data.event_stats.current_run
+
+        if not event:
+            season_content = "🎮 No events configured"
+            format_content = "💰 Entry: --"
+            bars_content = "🎮 No active run"
+            rank_content = "🏅 --"
+        else:
+            season_content = f"🎮 {event.name} ({event.format})"
+
+            if run:
+                if run.entry_currency == EntryCurrency.GEMS:
+                    format_content = f"💰 Entry: {event.entry_cost_gems} gems"
+                else:
+                    format_content = f"💰 Entry: {event.entry_cost_gold} gold"
+            else:
+                costs = []
+                if event.entry_cost_gems is not None:
+                    costs.append(f"{event.entry_cost_gems} gems")
+                if event.entry_cost_gold is not None:
+                    costs.append(f"{event.entry_cost_gold} gold")
+                format_content = f"💰 Entry: {' / '.join(costs)}" if costs else "💰 Entry: --"
+
+            if run:
+                bars_content = f"🎮 Record: {run.wins}W-{run.losses}L"
+            else:
+                bars_content = "🎮 No active run"
+
+            if run:
+                milestone = run.highest_milestone(event)
+                rank_content = f"🏅 {milestone.name if milestone else 'None yet'}"
+            else:
+                rank_content = "🏅 --"
+
+        try:
+            self.query_one(".top-season", Static).update(season_content)
+            self.query_one(".top-format", Static).update(format_content)
+            self.query_one(".top-bars", Static).update(bars_content)
+            self.query_one(".top-rank", Static).update(rank_content)
+        except Exception:
+            pass  # Ignore if widgets not found during startup
+
+    def _update_ranked_display(self):
+        """Update the top panel for the ranked ladder (original behavior)."""
         current_rank = self.app_data.get_current_rank()
         format_name = self.app_data.current_format.value.upper()
         stats = self.app_data.stats
@@ -974,7 +1029,8 @@ class EventRunPanel(Static):
             return Static("\n".join(lines), classes="session-section")
 
         win_bars = "".join(
-            "[gold1][██][/gold1]" if i < run.wins else "[  ]" for i in range(event.win_cap)
+            "[rgb(255,215,0)][██][/rgb(255,215,0)]" if i < run.wins else "[  ]"
+            for i in range(event.win_cap)
         )
         loss_bars = "".join(
             "[red][▓▓][/red]" if i < run.losses else "[  ]" for i in range(event.loss_cap)
@@ -2279,7 +2335,7 @@ class ManualTUIApp(App):
 
     def compose(self) -> ComposeResult:
         with Container():
-            yield TopPanel(self.app_data).add_class("top-panel")
+            yield TopPanel(self.app_data, self.event_catalog).add_class("top-panel")
 
             with Container(id="main-content"):
                 if self.app_data.view_mode == "event":
