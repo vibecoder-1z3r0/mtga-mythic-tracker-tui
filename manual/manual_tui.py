@@ -1411,10 +1411,12 @@ class SwitchModeModal(ModalScreen):
         with Container(classes="switch-mode-modal-container"):
             yield Static("Switch Mode", classes="modal-title")
             with Vertical(classes="modal-form"):
-                yield Button("Constructed BO1", id="mode-bo1", variant="primary")
-                yield Button("Constructed BO3", id="mode-bo3", variant="primary")
-                yield Button("Limited", id="mode-limited", variant="primary")
-                yield Button("Event", id="mode-event", variant="primary")
+                with Horizontal(classes="switch-mode-modal-row"):
+                    yield Button("Constructed BO1", id="mode-bo1", variant="primary")
+                    yield Button("Constructed BO3", id="mode-bo3", variant="primary")
+                with Horizontal(classes="switch-mode-modal-row"):
+                    yield Button("Limited", id="mode-limited", variant="primary")
+                    yield Button("Event", id="mode-event", variant="primary")
             with Horizontal(classes="switch-mode-modal-buttons"):
                 yield Button("Cancel", id="cancel", variant="error")
 
@@ -2334,12 +2336,21 @@ class ManualTUIApp(App):
     }
 
     .switch-mode-modal-container {
-        width: 40;
-        height: 26;
+        width: 50;
+        height: 20;
         border: solid $primary;
         background: $surface;
         padding: 2;
         overflow-y: auto;
+    }
+
+    .switch-mode-modal-row {
+        height: 3;
+        margin-bottom: 1;
+    }
+
+    .switch-mode-modal-row Button {
+        width: 1fr;
     }
 
     .switch-mode-modal-buttons {
