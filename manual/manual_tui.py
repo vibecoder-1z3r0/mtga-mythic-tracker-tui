@@ -991,6 +991,15 @@ def _get_event_for_stats(
     return event_catalog[0] if event_catalog else None
 
 
+def _format_play_draw(play_draw: Optional[str]) -> str:
+    """Display label for a game's play/draw value."""
+    if play_draw == "Play":
+        return "On the Play"
+    if play_draw == "Draw":
+        return "On the Draw"
+    return "Unknown"
+
+
 class EventRunPanel(Static):
     """Left panel showing the current event run (Event Mode)."""
 
@@ -1044,7 +1053,7 @@ class EventRunPanel(Static):
 
         if run.games:
             last_game = run.games[-1]
-            play_draw = last_game.play_draw or "Unknown"
+            play_draw = _format_play_draw(last_game.play_draw)
             opp_deck = last_game.opponent_deck or "Unknown"
             lines.append(f"Last game: {play_draw}, vs {opp_deck}")
 
@@ -2145,7 +2154,7 @@ class EventGameNotesModal(ModalScreen):
 
     .event-notes-modal-container {
         width: 60;
-        height: 24;
+        height: 30;
         border: solid $primary;
         background: $surface;
         padding: 2;
@@ -2161,6 +2170,14 @@ class EventGameNotesModal(ModalScreen):
         width: 16;
         content-align: right middle;
         padding-right: 1;
+    }
+
+    .event-notes-textarea {
+        height: 6;
+        margin: 0 0 1 0;
+        border: solid $primary;
+        background: $surface;
+        color: $text;
     }
 
     .event-notes-modal-buttons {
@@ -2195,6 +2212,12 @@ class EventGameNotesModal(ModalScreen):
                     value=self.existing.get("play_draw") or "Unknown",
                     id="event-play-draw-select",
                 )
+            yield Static("Notes:")
+            yield TextArea(
+                text=self.existing.get("notes") or "",
+                id="event-game-notes-textarea",
+                classes="event-notes-textarea",
+            )
             with Horizontal(classes="event-notes-modal-buttons"):
                 yield Button("Save", id="save", variant="success")
                 if not self.forced:
@@ -2209,10 +2232,12 @@ class EventGameNotesModal(ModalScreen):
     def _save(self) -> None:
         opp_deck = self.query_one("#event-opp-deck-input", Input).value.strip()
         play_draw = self.query_one("#event-play-draw-select", Select).value
+        notes = self.query_one("#event-game-notes-textarea", TextArea).text.strip()
         self.dismiss(
             {
                 "opponent_deck": opp_deck or None,
                 "play_draw": play_draw if play_draw != "Unknown" else None,
+                "notes": notes,
             }
         )
 
@@ -2224,6 +2249,125 @@ class EventGameNotesModal(ModalScreen):
             self._save()
         else:
             self.dismiss(None)
+
+class EventGamesViewerModal(ModalScreen):
+    """Modal for viewing and editing per-game info across the current run
+    and recent completed runs (Event Mode, Ctrl+N).
+
+    Only opponent deck, play/draw, and notes are editable - never the
+    result, since changing a past win/loss would desync the session/
+    all-time totals it's already been folded into (no delete, for the
+    same reason).
+    """
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+        Binding("enter", "edit_selected", "Edit Selected"),
+    ]
+
+    CSS = """
+    EventGamesViewerModal {
+        align: center middle;
+    }
+
+    #event-games-dialog {
+        width: 95;
+        height: 30;
+        border: thick $primary;
+        background: $surface;
+        padding: 1;
+    }
+
+    .event-games-list {
+        height: 1fr;
+        border: solid $secondary;
+        margin: 1 0;
+    }
+
+    .event-games-buttons {
+        height: 3;
+        content-align: center middle;
+    }
+    """
+
+    def __init__(self, event_stats: EventStats, **kwargs):
+        super().__init__(**kwargs)
+        self.event_stats = event_stats
+        self.has_changes = False
+        self._games: List[EventGame] = []
+
+    def compose(self) -> ComposeResult:
+        with Container(id="event-games-dialog"):
+            yield Label("Event Game History", classes="modal-title")
+            yield Label("Use ↑↓ to select, then click Edit (deck/play-draw/notes)", classes="help-text")
+            table = DataTable(id="event-games-table", classes="event-games-list")
+            table.add_columns("Run", "#", "Result", "Play/Draw", "Opponent Deck")
+            table.cursor_type = "row"
+            yield table
+            with Horizontal(classes="event-games-buttons"):
+                yield Button("Edit Selected", id="edit", variant="success")
+                yield Button("Close", id="close", variant="primary")
+
+    def on_mount(self) -> None:
+        self._populate()
+
+    def _runs_newest_first(self):
+        runs = []
+        if self.event_stats.current_run:
+            runs.append(self.event_stats.current_run)
+        for run in reversed(self.event_stats.recent_runs):
+            if self.event_stats.current_run is not None and run.run_id == self.event_stats.current_run.run_id:
+                continue
+            runs.append(run)
+        return runs
+
+    def _populate(self) -> None:
+        table = self.query_one("#event-games-table", DataTable)
+        table.clear()
+        self._games = []
+        for run in self._runs_newest_first():
+            for i, game in enumerate(run.games, 1):
+                self._games.append(game)
+                table.add_row(
+                    run.run_id,
+                    str(i),
+                    game.result.value,
+                    _format_play_draw(game.play_draw),
+                    game.opponent_deck or "Unknown",
+                )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "edit":
+            self.action_edit_selected()
+        else:
+            self.dismiss("updated" if self.has_changes else None)
+
+    def action_edit_selected(self) -> None:
+        table = self.query_one("#event-games-table", DataTable)
+        if table.cursor_row is None or table.cursor_row >= len(self._games):
+            return
+        game = self._games[table.cursor_row]
+
+        modal = EventGameNotesModal(
+            {
+                "opponent_deck": game.opponent_deck,
+                "play_draw": game.play_draw,
+                "notes": game.notes,
+            }
+        )
+
+        def handle_result(result):
+            if result is not None:
+                game.opponent_deck = result.get("opponent_deck")
+                game.play_draw = result.get("play_draw")
+                game.notes = result.get("notes") or ""
+                self.has_changes = True
+                self._populate()
+
+        self.app.push_screen(modal, handle_result)
+
+    def action_cancel(self) -> None:
+        self.dismiss("updated" if self.has_changes else None)
 
 class AboutModal(ModalScreen):
     """Modal dialog showing project information, licensing, and credits."""
@@ -3099,6 +3243,7 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
             result=result,
             opponent_deck=notes.get("opponent_deck"),
             play_draw=notes.get("play_draw"),
+            notes=notes.get("notes") or "",
         )
         stats.record_game(game, event)
         self.refresh_panels()
@@ -3122,34 +3267,19 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
         self.push_screen(modal, handle_result)
 
     def _event_view_games(self) -> None:
-        """Show a read-only history of games played this run and in recent
-        completed runs (Event Mode, Ctrl+N)."""
-        stats = self.app_data.event_stats
-        lines = ["Event Game History", ""]
+        """Show and edit game history (this run + recent completed runs),
+        Event Mode Ctrl+N. Result is never editable here - only opponent
+        deck, play/draw, and notes - since changing a past win/loss would
+        desync the session/all-time totals it's already been folded into."""
+        modal = EventGamesViewerModal(self.app_data.event_stats)
 
-        def format_game(i, game: EventGame) -> str:
-            play_draw = game.play_draw or "Unknown"
-            opp = game.opponent_deck or "Unknown"
-            return f"  {i}. {game.result.value:<4} {play_draw:<7} vs {opp}"
+        def handle_result(result):
+            if result == "updated":
+                self.state_manager.save_state(self.app_data)
+                self.refresh_panels()
+                self.notify("Game updated", severity="success")
 
-        if stats.current_run and stats.current_run.games:
-            lines.append(f"Current Run ({stats.current_run.wins}W-{stats.current_run.losses}L):")
-            for i, game in enumerate(stats.current_run.games, 1):
-                lines.append(format_game(i, game))
-            lines.append("")
-
-        for run in reversed(stats.recent_runs):
-            if stats.current_run is not None and run.run_id == stats.current_run.run_id:
-                continue
-            lines.append(f"Run {run.run_id} ({run.wins}W-{run.losses}L):")
-            for i, game in enumerate(run.games, 1):
-                lines.append(format_game(i, game))
-            lines.append("")
-
-        if len(lines) == 2:
-            lines.append("No games recorded yet.")
-
-        self.push_screen(ConfirmationModal("\n".join(lines).rstrip()))
+        self.push_screen(modal, handle_result)
 
     def _event_restart_session(self) -> None:
         """Reset event session totals (keeps all-time totals), with confirmation."""
@@ -3352,8 +3482,9 @@ Ctrl+Q - Quit           I - About/Info
 Event Mode:
 F - Switch mode (choose Event)   U - Start new run
 W/L - Win/loss (current run)  D - Set deck being run
-N - Set opponent deck/play-draw (applies to the next game)
-Ctrl+N - View game history       R - Restart event session
+N - Set opponent deck/play-draw/notes (applies to the next game)
+Ctrl+N - View/edit game history (deck, play-draw, notes - not result)
+R - Restart event session
 Ctrl+R - Wipe all-time event totals (cannot be undone)
 
 Manual Editing:

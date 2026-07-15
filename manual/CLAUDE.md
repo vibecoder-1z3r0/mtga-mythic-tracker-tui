@@ -58,16 +58,18 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   session (confirmation modal, same as ranked).
 - Per-game tracking: **D** edits the current run's deck at any time. **N**
   opens `EventGameNotesModal` to set the *upcoming* game's opponent deck
-  (free text) and play/draw (Play/Draw/Unknown), stashed until the next
-  W/L consumes it. If W/L is pressed with nothing stashed, the same modal
-  reopens in `forced=True` mode (no Cancel button, since the win/loss is
-  already decided) so the game still gets recorded — Unknown/blank is a
-  one-keypress-away valid answer for both fields either way. **Ctrl+N**
-  opens a read-only game-history viewer (current run, then recent
-  completed runs) showing result/play-draw/opponent-deck per game — the
-  only intentionally-uneditable history view in the app, since editing a
-  past game would desync the session/all-time aggregates it's already
-  been folded into.
+  (free text), play/draw (Play/Draw/Unknown, displayed as "On the
+  Play"/"On the Draw" via `_format_play_draw()`), and free-text notes,
+  stashed until the next W/L consumes it. If W/L is pressed with nothing
+  stashed, the same modal reopens in `forced=True` mode (no Cancel button,
+  since the win/loss is already decided) so the game still gets recorded —
+  Unknown/blank is a one-keypress-away valid answer for both fields
+  either way. **Ctrl+N** opens `EventGamesViewerModal`, a `DataTable` of
+  every game (current run, then recent completed runs) with an "Edit
+  Selected" button that reopens `EventGameNotesModal` pre-filled for that
+  game. Only opponent deck / play-draw / notes are editable this way —
+  never `result` (and there's no delete) — since changing a past win/loss
+  would desync the session/all-time totals it's already been folded into.
 - Tests: `test_event_models.py` (pytest), covering prize/milestone
   lookup, run completion, session/all-time aggregation, and a
   StateManager save/load round-trip.
