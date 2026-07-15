@@ -2378,6 +2378,9 @@ class ManualTUIApp(App):
     
     def _update_session_timers(self) -> None:
         """Update session duration and last result timers."""
+        if self.app_data.view_mode == "event":
+            # StatsPanel isn't mounted in event view mode (EventStatsPanel is).
+            return
         try:
             # Find stats panel and tell it to refresh its session section
             stats_panel = self.query_one(StatsPanel)
