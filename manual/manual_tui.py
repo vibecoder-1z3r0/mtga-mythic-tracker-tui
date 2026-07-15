@@ -2355,6 +2355,11 @@ class ManualTUIApp(App):
     
     def update_status(self) -> None:
         """Update top panel and status."""
+        if len(self.screen_stack) > 1:
+            # A modal (help, confirmation, edit dialog, etc.) is on top of the
+            # base screen. TopPanel/StatsPanel live on the base screen, not
+            # the modal, so querying for them here would always fail.
+            return
         try:
             top_panel = self.query_one(TopPanel)
             top_panel.update_display()
@@ -2809,7 +2814,8 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
     def _event_restart_session(self) -> None:
         """Reset event session totals (keeps all-time totals), with confirmation."""
         modal = ConfirmationModal(
-            "Restart event session? This clears session totals (all-time totals are kept)."
+            "Restart event session? This clears session totals and discards the "
+            "current run, if any (all-time totals are kept)."
         )
 
         def handle_result(result):

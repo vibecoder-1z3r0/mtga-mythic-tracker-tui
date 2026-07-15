@@ -161,6 +161,23 @@ def test_event_stats_session_and_alltime_aggregation():
     assert stats.alltime_gems == 1600  # unchanged
 
 
+def test_event_stats_restart_session_discards_active_run():
+    """Test that restarting the session discards an in-progress run, rather
+    than leaving its stale wins/losses displayed after the reset."""
+    event = load_test_event()
+    stats = EventStats()
+
+    run = EventRun(run_id="r1", event_id=event.event_id, entry_currency="Gems")
+    stats.start_run(run)
+    stats.record_game(EventGame(result=EventGameResult.WIN), event)
+
+    assert stats.current_run is run
+    assert stats.current_run.status == EventRunStatus.ACTIVE
+
+    stats.restart_session()
+    assert stats.current_run is None
+
+
 def test_event_stats_rejects_game_with_no_active_run():
     """Test that recording a game with no active run is a safe no-op."""
     event = load_test_event()

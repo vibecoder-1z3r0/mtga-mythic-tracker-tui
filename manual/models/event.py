@@ -304,7 +304,9 @@ class EventStats:
 
     def restart_session(self) -> None:
         """Reset session-scoped counters but keep all-time totals (mirrors
-        SessionStats.reset_session)."""
+        SessionStats.reset_session). Also discards any in-progress run, since
+        a restarted session shouldn't keep showing a stale run's wins/losses."""
+        self.current_run = None
         self.session_runs_played = 0
         self.session_wins = 0
         self.session_losses = 0
