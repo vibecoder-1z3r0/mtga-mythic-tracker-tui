@@ -1127,7 +1127,8 @@ class EventStatsPanel(Static):
         if not games:
             return Static("📈 TRENDS\nNo games recorded yet.", classes="session-section")
 
-        recent = games[-10:]
+        # Most recent game on the left, falling off to the right as it ages.
+        recent = list(reversed(games[-10:]))
 
         result_glyphs = "".join(
             "[rgb(255,215,0)]W[/rgb(255,215,0)]" if g.result == EventGameResult.WIN else "[red]L[/red]"

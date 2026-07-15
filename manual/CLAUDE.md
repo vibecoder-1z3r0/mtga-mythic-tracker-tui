@@ -100,11 +100,13 @@ Kept fully standalone (dataclasses, no imports from the parent project's
 - `EventStatsPanel` has a "Trends (Last 10 Games)" section built from
   `_all_event_games_chronological()` (recent_runs, oldest-first since
   that's how they're appended, then the current run's games tacked on
-  the end) sliced to `[-10:]`: a W/L glyph string (gold/red, matching
-  the win/loss pip colors) and a Play/Draw glyph string (cyan "P" /
-  magenta "D" / dim "?" for unrecorded), plus an overall "On the Play %"
-  computed across *all* games with a known play/draw (not just the last
-  10), since that's a running total rather than a windowed one.
+  the end) sliced to `[-10:]` and then reversed, so the most recent game
+  is leftmost and it "falls off" to the right as it ages: a W/L glyph
+  string (gold/red, matching the win/loss pip colors) and a Play/Draw
+  glyph string (cyan "P" / magenta "D" / dim "?" for unrecorded), plus an
+  overall "On the Play %" computed across *all* games with a known
+  play/draw (not just the last 10), since that's a running total rather
+  than a windowed one.
 - Panel headers ("─ Event Mode: Current Run ─", "─ Event Session &
   All-Time Stats ─") were removed from `EventRunPanel`/`EventStatsPanel`
   as redundant screen real estate — the top bar already names the event,
