@@ -108,9 +108,48 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   Mode's history/wipe actions deliberately live on their own combos
   (Ctrl+G/Ctrl+R/Ctrl+W) rather than reusing ranked's Ctrl+N, so both
   modes' conventions stay independent.
+- **Ctrl+E**/**Ctrl+O** export/import the *entire* app state (ranked +
+  event, everything) to/from a standalone JSON file — global, not
+  Event-Mode-specific. `StateManager.export_state()` writes a timestamped
+  copy under `data_dir/exports/` (or an explicit path) without touching
+  the live `tracker_state.json`; `import_state()` loads an arbitrary file
+  through the same reconstruction path as `load_state()` and raises on
+  failure instead of silently falling back to defaults, since an
+  explicit user-initiated import needs to surface a bad file, not treat
+  it as if no data existed. `ImportDataModal` collects the path
+  (pre-filled with the most recent export, if any) and a
+  `ConfirmationModal` gates the actual replacement, since import
+  overwrites all current data. Added directly in response to a real
+  incident (see below) where a silent data-loss bug had no recovery
+  path at all.
+- `load_state()`/`save_state()` are thin wrappers around
+  `_reconstruct_app_data()`/`_serialize_app_data()`, shared with
+  `import_state()`/`export_state()` respectively, so both paths use
+  identical (de)serialization logic rather than parallel
+  implementations that could drift.
+- **Incident**: renaming `EventStats.session_goal_wins` to
+  `run_goal_wins` broke loading for anyone who'd already saved with the
+  old name — `EventStats(**stats_dict)` raised `TypeError` on the
+  unexpected kwarg, and `load_state()`'s broad `except` caught it by
+  silently discarding the *entire* save file (ranks, sessions, event
+  history) in favor of a blank default. Fixed two ways: `_known_fields()`
+  strips any dict keys that aren't real dataclass fields before
+  construction (applied at every reconstruction site), so a
+  renamed/removed field now just resets to its default instead of
+  crashing the whole load; and `_backup_unreadable_state()` copies a
+  file that still fails to load aside as
+  `tracker_state.corrupted-<timestamp>.json` before falling back to
+  defaults, so a future bug can't silently overwrite real data via the
+  next autosave. A related bug found during the same investigation:
+  `_deserialize_datetimes()`'s recursive walk only descended into dicts,
+  not lists, so `EventGame.timestamp` and `EventRun.start_time`/
+  `end_time` (nested inside `current_run.games`/`recent_runs`) came back
+  as plain ISO strings instead of `datetime` objects after every reload
+  - fixed by recursing into lists too.
 - Tests: `test_event_models.py` (pytest), covering prize/milestone
-  lookup, run completion, session/all-time aggregation, and a
-  StateManager save/load round-trip.
+  lookup, run completion, session/all-time aggregation, a StateManager
+  save/load round-trip, the renamed-field and nested-datetime regression
+  cases above, and an export/import round trip.
 
 ## TUI Layout
 

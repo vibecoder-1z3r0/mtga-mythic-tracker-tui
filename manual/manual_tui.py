@@ -2152,6 +2152,63 @@ class SetEventGoalModal(ModalScreen):
         """Cancel and close modal without changing anything."""
         self.dismiss(None)
 
+class ImportDataModal(ModalScreen):
+    """Modal for entering a file path to import (Ctrl+O). Importing
+    replaces ALL current data, so this only collects the path here -
+    the caller shows a separate ConfirmationModal once the path is
+    validated to exist."""
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    CSS = """
+    ImportDataModal {
+        align: center middle;
+    }
+
+    .import-modal-container {
+        width: 80;
+        height: 14;
+        border: solid $primary;
+        background: $surface;
+        padding: 2;
+    }
+
+    .import-modal-buttons {
+        height: 3;
+        margin-top: 1;
+        align: center middle;
+    }
+    """
+
+    def __init__(self, default_path: str = "", **kwargs):
+        super().__init__(**kwargs)
+        self.default_path = default_path
+
+    def compose(self) -> ComposeResult:
+        with Container(classes="import-modal-container"):
+            yield Static("Import Data (replaces ALL current data)", classes="modal-title")
+            yield Static("File path:")
+            yield Input(
+                value=self.default_path,
+                placeholder="/path/to/tracker_state_export_....json",
+                id="import-path-input",
+            )
+            with Horizontal(classes="import-modal-buttons"):
+                yield Button("Import", id="import", variant="error")
+                yield Button("Cancel", id="cancel", variant="primary")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "import":
+            path = self.query_one("#import-path-input", Input).value.strip()
+            self.dismiss(path or None)
+        else:
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
 class SetEventDeckModal(ModalScreen):
     """Modal for setting/editing the deck being played in an event run."""
 
@@ -2436,7 +2493,13 @@ class EventGamesViewerModal(ModalScreen):
         table.clear()
         self._rows = []
         for run in self._runs_newest_first():
-            for i, game in enumerate(run.games, 1):
+            # Newest game first within each run too, so the very first
+            # game of the very first run ends up at the bottom of the
+            # whole table - true reverse-chronological order. Game
+            # numbers stay their true 1-based index; only display order
+            # reverses.
+            numbered_games = list(enumerate(run.games, 1))
+            for i, game in reversed(numbered_games):
                 self._rows.append((run, game))
                 table.add_row(
                     run.run_id,
@@ -2966,6 +3029,8 @@ class ManualTUIApp(App):
         Binding("ctrl+g", "view_event_games", "Game History (Event Mode)"),
         Binding("ctrl+r", "view_event_runs", "Run History (Event Mode)"),
         Binding("ctrl+w", "wipe_event_alltime", "Wipe All-Time (Event Mode)"),
+        Binding("ctrl+e", "export_data", "Export Data (Backup)"),
+        Binding("ctrl+o", "import_data", "Import Data"),
     ]
 
     # Ranked-only actions with no Event Mode behavior at all - hidden from
@@ -3432,7 +3497,9 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
             self.notify("No events configured in events.json", severity="error")
             return
 
-        run_id = f"run_{stats.alltime_runs_played + 1}"
+        # Zero-padded so run IDs sort correctly as plain text (run_02 <
+        # run_10), not just numerically.
+        run_id = f"run_{stats.alltime_runs_played + 1:02d}"
         run = EventRun(
             run_id=run_id, event_id=event.event_id, entry_currency=self._default_entry_currency(event)
         )
@@ -3649,6 +3716,60 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
 
         self.push_screen(modal, handle_result)
 
+    def action_export_data(self) -> None:
+        """Export current data (ranked + event, everything) to a
+        timestamped backup file. Non-destructive - never touches the
+        live save file (Ctrl+E)."""
+        try:
+            export_path = self.state_manager.export_state(self.app_data)
+            self.notify(f"Exported to {export_path}", severity="success")
+        except Exception as e:
+            self.notify(f"Export failed: {e}", severity="error")
+
+    def action_import_data(self) -> None:
+        """Import a previously exported file, REPLACING all current data
+        after confirmation (Ctrl+O). Prefills the most recent export
+        under data_dir/exports/, if any."""
+        exports_dir = self.state_manager.data_dir / "exports"
+        default_path = ""
+        if exports_dir.exists():
+            exports = sorted(exports_dir.glob("tracker_state_export_*.json"))
+            if exports:
+                default_path = str(exports[-1])
+
+        modal = ImportDataModal(default_path)
+
+        def handle_path(path):
+            if not path:
+                return
+            import_path = Path(path)
+            if not import_path.exists():
+                self.notify(f"File not found: {import_path}", severity="error")
+                return
+
+            confirm = ConfirmationModal(
+                f"Import {import_path.name}? This REPLACES all current data "
+                "(ranked + event, session + all-time). This cannot be undone "
+                "unless you have another backup."
+            )
+
+            def handle_confirm(confirmed):
+                if not confirmed:
+                    return
+                try:
+                    imported = self.state_manager.import_state(import_path)
+                except Exception as e:
+                    self.notify(f"Import failed: {e}", severity="error")
+                    return
+                self.app_data = imported
+                self.state_manager.save_state(self.app_data)
+                self.refresh_panels()
+                self.notify(f"Imported from {import_path.name}", severity="success")
+
+            self.push_screen(confirm, handle_confirm)
+
+        self.push_screen(modal, handle_path)
+
     def action_pause_resume_session(self) -> None:
         """Pause or resume the session timer."""
         stats = self.app_data.stats
@@ -3812,6 +3933,7 @@ C - Collapse tiers      H - Hide tiers
 R - Restart session     P - Pause/Resume timer
 Shift+S - Start game    S - Set rank manually
 Ctrl+Q - Quit           I - About/Info
+Ctrl+E - Export data (backup)   Ctrl+O - Import data (replaces everything)
 
 Event Mode:
 F - Switch mode (choose Event)   U - Start new run

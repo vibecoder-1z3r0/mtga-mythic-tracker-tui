@@ -60,64 +60,77 @@ class StateManager:
         """Load application state from file or create default."""
         if not self.save_enabled or not self.state_file.exists():
             return self._create_default_state()
-        
+
         try:
             with open(self.state_file, 'r') as f:
                 data = json.load(f)
-            
-            # Convert datetime strings back to objects
-            self._deserialize_datetimes(data)
-            self._deserialize_enums(data)
-            
-            # Migrate old format values to new BO1/BO3 system
-            self._migrate_format_values(data)
-            
-            # Reconstruct objects
-            constructed_rank = ManualRank(**_known_fields(ManualRank, data['constructed_rank']))
-            limited_rank = ManualRank(**_known_fields(ManualRank, data['limited_rank']))
-
-            # Handle SessionStats with potential missing fields
-            stats_data = data['stats']
-
-            # Reconstruct CompletedSession objects from session_history
-            if 'session_history' in stats_data and stats_data['session_history']:
-                session_history = []
-                for session_dict in stats_data['session_history']:
-                    session_history.append(CompletedSession(**_known_fields(CompletedSession, session_dict)))
-                stats_data['session_history'] = session_history
-
-            # Reconstruct ManualRank objects for season_start_rank and season_highest_rank
-            if 'season_start_rank' in stats_data and isinstance(stats_data['season_start_rank'], dict):
-                stats_data['season_start_rank'] = ManualRank(**_known_fields(ManualRank, stats_data['season_start_rank']))
-
-            if 'season_highest_rank' in stats_data and isinstance(stats_data['season_highest_rank'], dict):
-                stats_data['season_highest_rank'] = ManualRank(**_known_fields(ManualRank, stats_data['season_highest_rank']))
-
-            stats = SessionStats(**_known_fields(SessionStats, stats_data))
-            
-            event_stats_data = data.get('event_stats')
-            event_stats = (
-                self._reconstruct_event_stats(event_stats_data) if event_stats_data else EventStats()
-            )
-
-            return AppData(
-                constructed_rank=constructed_rank,
-                limited_rank=limited_rank,
-                current_format=FormatType(data['current_format']),
-                stats=stats,
-                show_mythic_progress=data.get('show_mythic_progress', True),
-                collapsed_tiers=[RankTier(t) for t in data.get('collapsed_tiers', [])],
-                hidden_tiers=[RankTier(t) for t in data.get('hidden_tiers', [])],
-                auto_collapse_mode=data.get('auto_collapse_mode', False),
-                auto_hide_mode=data.get('auto_hide_mode', False),
-                event_stats=event_stats,
-                view_mode=data.get('view_mode', 'ranked')
-            )
-            
+            return self._reconstruct_app_data(data)
         except Exception as e:
             print(f"Error loading state: {e}")
             self._backup_unreadable_state()
             return self._create_default_state()
+
+    def import_state(self, import_path: Path) -> AppData:
+        """Load AppData from an arbitrary file (e.g. a previous export),
+        using the same reconstruction path as load_state(). Raises on
+        failure rather than silently falling back to defaults, since the
+        caller (an explicit user-initiated import) needs to know if the
+        file was bad, not have it treated as if no data existed."""
+        with open(import_path, 'r') as f:
+            data = json.load(f)
+        return self._reconstruct_app_data(data)
+
+    def _reconstruct_app_data(self, data: dict) -> AppData:
+        """Shared by load_state() and import_state(): turn a raw parsed
+        JSON dict into an AppData instance."""
+        # Convert datetime strings back to objects
+        self._deserialize_datetimes(data)
+        self._deserialize_enums(data)
+
+        # Migrate old format values to new BO1/BO3 system
+        self._migrate_format_values(data)
+
+        # Reconstruct objects
+        constructed_rank = ManualRank(**_known_fields(ManualRank, data['constructed_rank']))
+        limited_rank = ManualRank(**_known_fields(ManualRank, data['limited_rank']))
+
+        # Handle SessionStats with potential missing fields
+        stats_data = data['stats']
+
+        # Reconstruct CompletedSession objects from session_history
+        if 'session_history' in stats_data and stats_data['session_history']:
+            session_history = []
+            for session_dict in stats_data['session_history']:
+                session_history.append(CompletedSession(**_known_fields(CompletedSession, session_dict)))
+            stats_data['session_history'] = session_history
+
+        # Reconstruct ManualRank objects for season_start_rank and season_highest_rank
+        if 'season_start_rank' in stats_data and isinstance(stats_data['season_start_rank'], dict):
+            stats_data['season_start_rank'] = ManualRank(**_known_fields(ManualRank, stats_data['season_start_rank']))
+
+        if 'season_highest_rank' in stats_data and isinstance(stats_data['season_highest_rank'], dict):
+            stats_data['season_highest_rank'] = ManualRank(**_known_fields(ManualRank, stats_data['season_highest_rank']))
+
+        stats = SessionStats(**_known_fields(SessionStats, stats_data))
+
+        event_stats_data = data.get('event_stats')
+        event_stats = (
+            self._reconstruct_event_stats(event_stats_data) if event_stats_data else EventStats()
+        )
+
+        return AppData(
+            constructed_rank=constructed_rank,
+            limited_rank=limited_rank,
+            current_format=FormatType(data['current_format']),
+            stats=stats,
+            show_mythic_progress=data.get('show_mythic_progress', True),
+            collapsed_tiers=[RankTier(t) for t in data.get('collapsed_tiers', [])],
+            hidden_tiers=[RankTier(t) for t in data.get('hidden_tiers', [])],
+            auto_collapse_mode=data.get('auto_collapse_mode', False),
+            auto_hide_mode=data.get('auto_hide_mode', False),
+            event_stats=event_stats,
+            view_mode=data.get('view_mode', 'ranked')
+        )
 
     def _backup_unreadable_state(self) -> None:
         """Preserve a state file that failed to load by copying it aside,
@@ -139,32 +152,47 @@ class StateManager:
         """Save application state to file."""
         if not self.save_enabled:
             return
-        
+
         try:
-            # Convert to serializable format
-            data = {
-                'constructed_rank': asdict(app_data.constructed_rank),
-                'limited_rank': asdict(app_data.limited_rank),
-                'current_format': app_data.current_format.value,
-                'stats': asdict(app_data.stats),
-                'show_mythic_progress': app_data.show_mythic_progress,
-                'collapsed_tiers': [t.value for t in app_data.collapsed_tiers],
-                'hidden_tiers': [t.value for t in app_data.hidden_tiers],
-                'auto_collapse_mode': app_data.auto_collapse_mode,
-                'auto_hide_mode': app_data.auto_hide_mode,
-                'event_stats': asdict(app_data.event_stats),
-                'view_mode': app_data.view_mode
-            }
-            
-            # Serialize datetime objects
-            self._serialize_datetimes(data)
-            self._serialize_enums(data)
-            
+            data = self._serialize_app_data(app_data)
             with open(self.state_file, 'w') as f:
                 json.dump(data, f, indent=2, default=str)
-                
         except Exception as e:
             print(f"Error saving state: {e}")
+
+    def export_state(self, app_data: AppData, export_path: Optional[Path] = None) -> Path:
+        """Write a standalone backup of app_data to export_path (or an
+        auto-named file under data_dir/exports/ if not given). Does not
+        touch the live state file, so it's always safe to call."""
+        if export_path is None:
+            exports_dir = self.data_dir / "exports"
+            exports_dir.mkdir(parents=True, exist_ok=True)
+            export_path = exports_dir / f"tracker_state_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+
+        data = self._serialize_app_data(app_data)
+        with open(export_path, 'w') as f:
+            json.dump(data, f, indent=2, default=str)
+        return export_path
+
+    def _serialize_app_data(self, app_data: AppData) -> dict:
+        """Shared by save_state() and export_state(): turn AppData into a
+        JSON-serializable dict."""
+        data = {
+            'constructed_rank': asdict(app_data.constructed_rank),
+            'limited_rank': asdict(app_data.limited_rank),
+            'current_format': app_data.current_format.value,
+            'stats': asdict(app_data.stats),
+            'show_mythic_progress': app_data.show_mythic_progress,
+            'collapsed_tiers': [t.value for t in app_data.collapsed_tiers],
+            'hidden_tiers': [t.value for t in app_data.hidden_tiers],
+            'auto_collapse_mode': app_data.auto_collapse_mode,
+            'auto_hide_mode': app_data.auto_hide_mode,
+            'event_stats': asdict(app_data.event_stats),
+            'view_mode': app_data.view_mode
+        }
+        self._serialize_datetimes(data)
+        self._serialize_enums(data)
+        return data
     
     def _create_default_state(self) -> AppData:
         """Create default application state."""

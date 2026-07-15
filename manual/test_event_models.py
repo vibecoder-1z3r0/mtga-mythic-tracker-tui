@@ -333,6 +333,31 @@ def test_state_manager_deserializes_datetimes_nested_in_lists():
         assert isinstance(loaded.event_stats.current_run.games[0].timestamp, dt)
 
 
+def test_state_manager_export_import_round_trip():
+    """Test that export_state()/import_state() round-trip event data
+    correctly, and that import_state() doesn't touch the live state file
+    (it's a separate, standalone backup file)."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        event = load_test_event()
+
+        sm = StateManager(data_dir=Path(temp_dir), save_enabled=True)
+        app_data = sm.load_state()
+        run = EventRun(run_id="r1", event_id=event.event_id, entry_currency="Gems")
+        app_data.event_stats.start_run(run)
+        app_data.event_stats.record_game(EventGame(result=EventGameResult.WIN), event)
+        app_data.event_stats.alltime_wins = 5
+
+        export_path = sm.export_state(app_data)
+        assert export_path.exists()
+
+        imported = sm.import_state(export_path)
+        assert imported.event_stats.alltime_wins == 5
+        assert imported.event_stats.current_run.games[0].result == EventGameResult.WIN
+
+        # export_state() must not have touched the live (unrelated) state file.
+        assert not sm.state_file.exists()
+
+
 def main():
     """Run all event model tests."""
     test_load_event_catalog()
@@ -351,6 +376,7 @@ def main():
     test_state_manager_persists_event_stats()
     test_state_manager_survives_renamed_field_in_saved_file()
     test_state_manager_deserializes_datetimes_nested_in_lists()
+    test_state_manager_export_import_round_trip()
     print("All manual-TUI event model tests passed!")
 
 
