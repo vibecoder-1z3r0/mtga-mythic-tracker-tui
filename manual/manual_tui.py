@@ -1006,7 +1006,8 @@ class EventRunPanel(Static):
             yield self._create_run_section()
             yield Static("─" * 30, classes="separator")
             yield Static(
-                "[U] Start Run  [W] Win  [L] Loss  [R] Restart Session  [V] Back to Ranked",
+                "[U] Start Run  [W] Win  [L] Loss  [R] Restart Session  "
+                "[Ctrl+R] Wipe All-Time  [F] Switch Mode",
                 classes="help-text",
             )
 
@@ -1391,6 +1392,46 @@ class SetGoalModal(ModalScreen):
     
     def action_cancel(self) -> None:
         """Cancel and close modal."""
+        self.dismiss(None)
+
+class SwitchModeModal(ModalScreen):
+    """Modal dialog for switching between ranked formats and Event Mode."""
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+        Binding("f", "cancel", "Cancel"),
+    ]
+
+    def __init__(self, current_format: FormatType, view_mode: str, **kwargs):
+        super().__init__(**kwargs)
+        self.current_format = current_format
+        self.view_mode = view_mode
+
+    def compose(self) -> ComposeResult:
+        with Container(classes="switch-mode-modal-container"):
+            yield Static("Switch Mode", classes="modal-title")
+            with Vertical(classes="modal-form"):
+                yield Button("Constructed BO1", id="mode-bo1", variant="primary")
+                yield Button("Constructed BO3", id="mode-bo3", variant="primary")
+                yield Button("Limited", id="mode-limited", variant="primary")
+                yield Button("Event", id="mode-event", variant="primary")
+            with Horizontal(classes="switch-mode-modal-buttons"):
+                yield Button("Cancel", id="cancel", variant="error")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        mapping = {
+            "mode-bo1": ("ranked", FormatType.CONSTRUCTED_BO1),
+            "mode-bo3": ("ranked", FormatType.CONSTRUCTED_BO3),
+            "mode-limited": ("ranked", FormatType.LIMITED),
+            "mode-event": ("event", None),
+        }
+        if event.button.id in mapping:
+            self.dismiss(mapping[event.button.id])
+        else:
+            self.action_cancel()
+
+    def action_cancel(self) -> None:
+        """Cancel and close modal without changing anything."""
         self.dismiss(None)
 
 class SetRankModal(ModalScreen):
@@ -2278,7 +2319,7 @@ class ManualTUIApp(App):
     SetGoalModal {
         align: center middle;
     }
-    
+
     .goal-modal-container {
         width: 60;
         height: 25;
@@ -2286,6 +2327,25 @@ class ManualTUIApp(App):
         background: $surface;
         padding: 2;
         overflow-y: auto;
+    }
+
+    SwitchModeModal {
+        align: center middle;
+    }
+
+    .switch-mode-modal-container {
+        width: 40;
+        height: 26;
+        border: solid $primary;
+        background: $surface;
+        padding: 2;
+        overflow-y: auto;
+    }
+
+    .switch-mode-modal-buttons {
+        height: 3;
+        margin-top: 1;
+        align: center middle;
     }
     
     .confirmation-modal-message {
@@ -2321,8 +2381,8 @@ class ManualTUIApp(App):
         Binding("ctrl+q", "quit", "Quit"),
         Binding("?", "help", "Help"),
         Binding("i", "about", "About"),
-        Binding("v", "toggle_event_mode", "Event Mode"),
         Binding("u", "start_event_run", "Start Run (Event Mode)"),
+        Binding("ctrl+r", "wipe_event_alltime", "Wipe All-Time (Event Mode)"),
     ]
     
     def __init__(self, state_manager: StateManager):
@@ -2476,30 +2536,25 @@ class ManualTUIApp(App):
         self.refresh_panels()
     
     def action_switch_format(self) -> None:
-        """Switch between BO1, BO3, and Limited."""
-        # Cycle through format types
-        if self.app_data.current_format == FormatType.CONSTRUCTED_BO1:
-            self.app_data.current_format = FormatType.CONSTRUCTED_BO3
-            new_format = "BO3"
-        elif self.app_data.current_format == FormatType.CONSTRUCTED_BO3:
-            self.app_data.current_format = FormatType.LIMITED
-            new_format = "LIMITED"
-        else:  # LIMITED
-            self.app_data.current_format = FormatType.CONSTRUCTED_BO1
-            new_format = "BO1"
-        
-        # Immediately update just the format column
-        try:
-            format_widget = self.query_one(".top-format", Static)
-            format_widget.update(f"📊 {new_format}")
-        except:
-            pass
-        
-        # Force immediate update of everything
-        self.refresh_panels()
-        
-        # Also call update_status to ensure top panel updates
-        self.update_status()
+        """Open a modal to switch between ranked formats (BO1/BO3/Limited)
+        and Event Mode."""
+        modal = SwitchModeModal(self.app_data.current_format, self.app_data.view_mode)
+
+        def handle_result(result):
+            if result is None:
+                return
+            mode, format_type = result
+            if mode == "event":
+                self.app_data.view_mode = "event"
+                self.notify("Switched to Event view", severity="information")
+            else:
+                self.app_data.view_mode = "ranked"
+                self.app_data.current_format = format_type
+                self.notify(f"Switched to {format_type.value}", severity="information")
+            self.refresh_panels()
+            self.update_status()
+
+        self.push_screen(modal, handle_result)
     
     def action_set_goal(self) -> None:
         """Set session goal rank via modal."""
@@ -2748,16 +2803,10 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
 
         self.push_screen(modal, handle_restart_result)
 
-    def action_toggle_event_mode(self) -> None:
-        """Toggle between the ranked view and the event-mode view."""
-        self.app_data.view_mode = "event" if self.app_data.view_mode == "ranked" else "ranked"
-        self.refresh_panels()
-        self.notify(f"Switched to {self.app_data.view_mode.title()} view", severity="information")
-
     def action_start_event_run(self) -> None:
         """Start a new event run (Event Mode only)."""
         if self.app_data.view_mode != "event":
-            self.notify("Press V to switch to Event Mode first", severity="warning")
+            self.notify("Press F and choose Event to switch to Event Mode first", severity="warning")
             return
 
         stats = self.app_data.event_stats
@@ -2824,7 +2873,27 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
                 self.refresh_panels()
 
         self.push_screen(modal, handle_result)
-    
+
+    def action_wipe_event_alltime(self) -> None:
+        """Permanently wipe event all-time totals (Event Mode only)."""
+        if self.app_data.view_mode != "event":
+            self.notify("Press F and choose Event to switch to Event Mode first", severity="warning")
+            return
+
+        modal = ConfirmationModal(
+            "Wipe ALL-TIME event totals? This permanently erases all-time wins/"
+            "losses/prizes/milestones and recent runs, and also clears the "
+            "current session and run. This cannot be undone."
+        )
+
+        def handle_result(result):
+            if result:
+                self.app_data.event_stats.wipe_alltime()
+                self.refresh_panels()
+                self.notify("All-time event totals wiped", severity="warning")
+
+        self.push_screen(modal, handle_result)
+
     def action_pause_resume_session(self) -> None:
         """Pause or resume the session timer."""
         stats = self.app_data.stats
@@ -2979,15 +3048,20 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
 
 Keyboard Shortcuts:
 W/+ - Add win       L/- - Add loss
-F - Switch format (BO1/BO3/Limited)  
+F - Switch mode (Constructed BO1/BO3, Limited, or Event)
 G - Set session goal    T - Set season start rank
 E - Edit stats (streaks, session start)
 N - Add game notes    Ctrl+N - View all notes
 M - Toggle mythic progress
 C - Collapse tiers      H - Hide tiers
 R - Restart session     P - Pause/Resume timer
-Shift+S - Start game    S - Set rank manually   
+Shift+S - Start game    S - Set rank manually
 Ctrl+Q - Quit           I - About/Info
+
+Event Mode:
+F - Switch mode (choose Event)   U - Start new run
+W/L - Win/loss (current run)  R - Restart event session
+Ctrl+R - Wipe all-time event totals (cannot be undone)
 
 Manual Editing:
 Click any [bracketed] value to edit inline

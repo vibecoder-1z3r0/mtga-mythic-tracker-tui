@@ -19,7 +19,7 @@ A completely standalone Terminal User Interface (TUI) application for manually t
 ✅ **Enhanced Statistics** - Win rates, current/best/worst streaks  
 ✅ **Season Management** - Countdown timers, editable dates  
 ✅ **State Persistence** - Auto-save/load with CLI options  
-✅ **Event Mode** - Run-based event tracking (Historic Pauper Challenge, etc.), toggled with **V**
+✅ **Event Mode** - Run-based event tracking (Historic Pauper Challenge, etc.), selected via the **F** switch-mode modal
 
 ### Event Mode (run-based events, e.g. Historic Pauper Challenge)
 A second, independent tracking mode alongside the ranked ladder, for events
@@ -39,13 +39,18 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   amount if Gems, else the event's own Gems option) for profit calc.
 - `EventStats` mirrors `SessionStats`'s session-vs-season split:
   `session_*` counters reset when you restart the event session (**R**
-  in Event Mode), `alltime_*` counters never reset. Both are folded from
-  each completed run automatically (`EventStats.record_game`).
+  in Event Mode), `alltime_*` counters never reset except via an explicit
+  **Ctrl+R** wipe (confirmation-gated, also clears the current run and
+  session totals — this cannot be undone). Session/all-time counters are
+  folded from each completed run automatically (`EventStats.record_game`).
 - `storage/state_manager.py` — `AppData.event_stats` is persisted in the
   same single `tracker_state.json` blob as everything else, following
   this app's "one big JSON file" convention rather than the parent
   project's per-file managers.
-- UI: pressing **V** swaps the two main panels for `EventRunPanel` /
+- UI: **F** opens `SwitchModeModal`, a button-based dialog for picking
+  Constructed BO1, Constructed BO3, Limited, or Event (pressing **F** or
+  **Esc** while it's open dismisses it without changing anything);
+  choosing Event swaps the two main panels for `EventRunPanel` /
   `EventStatsPanel` (gold `[██]` win pips, red `[▓▓]` loss pips). **W**/
   **L** are context-sensitive — they drive the ranked rank or the event
   run depending on which view is active. **U** starts a new run, **R**

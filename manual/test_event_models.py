@@ -178,6 +178,40 @@ def test_event_stats_restart_session_discards_active_run():
     assert stats.current_run is None
 
 
+def test_event_stats_wipe_alltime_clears_everything():
+    """Test that wiping all-time totals also clears session totals, the
+    current run, and recent-runs history (unlike restart_session, which
+    keeps all-time totals)."""
+    event = load_test_event()
+    stats = EventStats()
+
+    run1 = EventRun(run_id="r1", event_id=event.event_id, entry_currency="Gems")
+    stats.start_run(run1)
+    for _ in range(7):
+        stats.record_game(EventGame(result=EventGameResult.WIN), event)
+
+    run2 = EventRun(run_id="r2", event_id=event.event_id, entry_currency="Gems")
+    stats.start_run(run2)
+    stats.record_game(EventGame(result=EventGameResult.WIN), event)
+
+    assert stats.alltime_wins == 7  # run2 is still active, not yet folded in
+    assert stats.current_run is run2
+    assert len(stats.recent_runs) == 1
+
+    stats.wipe_alltime()
+
+    assert stats.current_run is None
+    assert stats.session_runs_played == 0
+    assert stats.session_wins == 0
+    assert stats.alltime_runs_played == 0
+    assert stats.alltime_wins == 0
+    assert stats.alltime_losses == 0
+    assert stats.alltime_gems == 0
+    assert stats.alltime_packs == 0
+    assert stats.alltime_milestone_counts == {}
+    assert stats.recent_runs == []
+
+
 def test_event_stats_rejects_game_with_no_active_run():
     """Test that recording a game with no active run is a safe no-op."""
     event = load_test_event()

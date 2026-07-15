@@ -313,3 +313,22 @@ class EventStats:
         self.session_gems = 0
         self.session_packs = 0
         self.session_milestone_counts = {}
+
+    def wipe_alltime(self) -> None:
+        """Wipe all-time totals permanently. Also discards any in-progress
+        run and resets session totals, since an all-time wipe with a
+        leftover run or session total wouldn't make sense."""
+        self.current_run = None
+        self.session_runs_played = 0
+        self.session_wins = 0
+        self.session_losses = 0
+        self.session_gems = 0
+        self.session_packs = 0
+        self.session_milestone_counts = {}
+        self.alltime_runs_played = 0
+        self.alltime_wins = 0
+        self.alltime_losses = 0
+        self.alltime_gems = 0
+        self.alltime_packs = 0
+        self.alltime_milestone_counts = {}
+        self.recent_runs = []
