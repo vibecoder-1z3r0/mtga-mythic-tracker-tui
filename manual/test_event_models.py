@@ -248,6 +248,29 @@ def test_event_stats_rejects_game_with_no_active_run():
     assert stats.record_game(EventGame(result=EventGameResult.WIN), event) is False
 
 
+def test_event_stats_concede_run_folds_partial_record():
+    """Test that conceding a run early ends it and folds its partial
+    record into session/all-time totals, same as a natural completion -
+    a run previously could only end by reaching win_cap/loss_cap."""
+    event = load_test_event()
+    stats = EventStats()
+
+    run = EventRun(run_id="r1", event_id=event.event_id, entry_currency="Gems")
+    stats.start_run(run)
+    stats.record_game(EventGame(result=EventGameResult.WIN), event)
+
+    assert run.status == EventRunStatus.ACTIVE
+    assert stats.concede_run(event) is True
+    assert run.status == EventRunStatus.ENDED
+    assert stats.session_runs_played == 1
+    assert stats.session_wins == 1
+    assert stats.alltime_runs_played == 1
+    assert stats.alltime_gems == 150  # 1-win prize tier
+
+    # Conceding again (no active run) is a safe no-op.
+    assert stats.concede_run(event) is False
+
+
 def test_state_manager_persists_event_stats():
     """Test that EventStats (including nested runs) survives a save/load round trip."""
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -373,6 +396,7 @@ def main():
     test_event_stats_run_goal_wins_persists_across_restart()
     test_event_stats_wipe_alltime_clears_everything()
     test_event_stats_rejects_game_with_no_active_run()
+    test_event_stats_concede_run_folds_partial_record()
     test_state_manager_persists_event_stats()
     test_state_manager_survives_renamed_field_in_saved_file()
     test_state_manager_deserializes_datetimes_nested_in_lists()

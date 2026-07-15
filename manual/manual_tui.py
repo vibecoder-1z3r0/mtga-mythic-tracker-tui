@@ -1035,8 +1035,9 @@ class EventRunPanel(Static):
             yield Static("─" * 30, classes="separator")
             yield Static(
                 "[U] Start Run  [W] Win  [L] Loss  [D] Set Deck  [G] Set Win Goal  "
-                "[N] Opp Deck/Play-Draw  [Ctrl+G] Game History  [Ctrl+R] Run History  "
-                "[R] Restart Session  [Ctrl+W] Wipe All-Time  [F] Switch Mode",
+                "[C] Concede Run  [N] Opp Deck/Play-Draw  [Ctrl+G] Game History  "
+                "[Ctrl+R] Run History  [R] Restart Session  [Ctrl+W] Wipe All-Time  "
+                "[F] Switch Mode",
                 classes="help-text",
             )
 
@@ -3070,7 +3071,7 @@ class ManualTUIApp(App):
         Binding("f", "switch_format", "Switch Format"),
         Binding("g", "set_goal", "Set Goal"),
         Binding("m", "toggle_mythic", "Toggle Mythic"),
-        Binding("c", "collapse_tiers", "Collapse"),
+        Binding("c", "collapse_tiers", "Collapse / Concede Run"),
         Binding("h", "hide_tiers", "Hide"),
         Binding("r", "restart_session", "Restart Session"),
         Binding("p", "pause_resume_session", "Pause/Resume Timer"),
@@ -3093,13 +3094,13 @@ class ManualTUIApp(App):
     ]
 
     # Ranked-only actions with no Event Mode behavior at all - hidden from
-    # the Footer while in Event Mode. G (set_goal) is deliberately not
-    # here: it's context-sensitive and does something useful in both modes.
+    # the Footer while in Event Mode. G (set_goal) and C (collapse_tiers)
+    # are deliberately not here: they're context-sensitive and do
+    # something useful in both modes.
     RANKED_ONLY_ACTIONS = {
         "toggle_mythic",
         "set_season_start",
         "edit_stats",
-        "collapse_tiers",
         "hide_tiers",
         "set_rank",
         "view_all_notes",
@@ -3473,7 +3474,12 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
         self.refresh_panels()
     
     def action_collapse_tiers(self) -> None:
-        """Toggle auto-collapse mode for completed tiers."""
+        """Toggle auto-collapse mode for completed tiers (ranked), or
+        concede the current run early (Event Mode)."""
+        if self.app_data.view_mode == "event":
+            self._event_concede_run()
+            return
+
         # Toggle auto-collapse mode
         self.app_data.auto_collapse_mode = not self.app_data.auto_collapse_mode
         
@@ -3614,6 +3620,35 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
                 stats.run_goal_wins = result
                 self.refresh_panels()
                 self.notify(f"Run win goal set: {result} wins", severity="success")
+
+        self.push_screen(modal, handle_result)
+
+    def _event_concede_run(self) -> None:
+        """Concede the current run early (Event Mode, C key) - a run can
+        otherwise only end by reaching win_cap or loss_cap. Confirmation-
+        gated since it's irreversible and folds the partial record into
+        session/all-time totals right away."""
+        stats = self.app_data.event_stats
+        if not stats.current_run or stats.current_run.status == EventRunStatus.ENDED:
+            self.notify("No active run to concede", severity="warning")
+            return
+
+        run = stats.current_run
+        modal = ConfirmationModal(
+            f"Concede this run at {run.wins}-{run.losses}? This folds that record "
+            "into session/all-time totals right away. This cannot be undone."
+        )
+
+        def handle_result(confirmed):
+            if not confirmed:
+                return
+            event = self._get_current_event_definition()
+            if not event:
+                self.notify("No events configured in events.json", severity="error")
+                return
+            stats.concede_run(event)
+            self.refresh_panels()
+            self.notify(f"Run conceded at {run.wins}-{run.losses}", severity="warning")
 
         self.push_screen(modal, handle_result)
 
@@ -3998,13 +4033,14 @@ Event Mode:
 F - Switch mode (choose Event)   U - Start new run
 W/L - Win/loss (current run)  D - Set deck being run
 G - Set/clear a run win goal (celebrates when reached)
+C - Concede current run early (folds partial record in, cannot be undone)
 N - Set opponent deck/play-draw/notes (applies to the next game)
 Ctrl+G - View/edit game history (deck, play-draw, notes, result)
 Ctrl+R - Browse run history, drill into a run's games
 R - Restart event session
 Ctrl+W - Wipe all-time event totals (cannot be undone)
 
-M/T/E/C/H/S are ranked-only and not available in Event Mode.
+M/T/E/H/S are ranked-only and not available in Event Mode.
 
 Manual Editing:
 Click any [bracketed] value to edit inline

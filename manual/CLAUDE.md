@@ -118,17 +118,25 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   actually see in a normal-height terminal. `_win_pct()` adds a
   "(55.6%)" suffix to the session/all-time Record lines, blank if no
   games have been completed yet (division by zero guard).
-- Seven ranked-only actions (`toggle_mythic`, `set_season_start`,
-  `edit_stats`, `collapse_tiers`, `hide_tiers`, `set_rank`, and
-  `view_all_notes` — bound to M/T/E/C/H/S and Ctrl+N respectively) have no
-  Event Mode behavior at all, so `ManualTUIApp` overrides `check_action()`
-  to return `False` for them while `view_mode == "event"`, which disables
-  *and hides* them from the Textual `Footer` widget (vs. `None`, which
-  would just grey them out). `set_goal` (G) is deliberately excluded from
-  that list since it's context-sensitive rather than ranked-only. Event
+- Six ranked-only actions (`toggle_mythic`, `set_season_start`,
+  `edit_stats`, `hide_tiers`, `set_rank`, and `view_all_notes` — bound to
+  M/T/E/H/S and Ctrl+N respectively) have no Event Mode behavior at all,
+  so `ManualTUIApp` overrides `check_action()` to return `False` for them
+  while `view_mode == "event"`, which disables *and hides* them from the
+  Textual `Footer` widget (vs. `None`, which would just grey them out).
+  `set_goal` (G) and `collapse_tiers` (C) are deliberately excluded from
+  that list since they're context-sensitive rather than ranked-only. Event
   Mode's history/wipe actions deliberately live on their own combos
   (Ctrl+G/Ctrl+R/Ctrl+W) rather than reusing ranked's Ctrl+N, so both
   modes' conventions stay independent.
+- **C** is context-sensitive like G: ranked mode keeps its existing
+  auto-collapse-tiers toggle, while Event Mode repurposes it to concede
+  the current run early via `EventStats.concede_run()` (confirmation-
+  gated, since it's irreversible) - previously a run could *only* end by
+  naturally reaching `win_cap`/`loss_cap`, with no way to voluntarily
+  drop out partway through. `concede_run()` calls `run.end_run()` then
+  reuses `_complete_run()` to fold the partial record into session/
+  all-time totals exactly like a natural completion would.
 - **Ctrl+E**/**Ctrl+O** export/import the *entire* app state (ranked +
   event, everything) to/from a standalone JSON file — global, not
   Event-Mode-specific. `StateManager.export_state()` writes a timestamped

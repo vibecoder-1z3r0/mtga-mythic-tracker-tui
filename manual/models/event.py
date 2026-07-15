@@ -282,6 +282,17 @@ class EventStats:
             self._complete_run(self.current_run, event)
         return added
 
+    def concede_run(self, event: EventDefinition) -> bool:
+        """End the current run early (before it naturally reaches win_cap
+        or loss_cap) and fold its partial result into session/all-time
+        totals, same as a natural completion. Returns False if there's no
+        active run to concede."""
+        if not self.current_run or self.current_run.status == EventRunStatus.ENDED:
+            return False
+        self.current_run.end_run()
+        self._complete_run(self.current_run, event)
+        return True
+
     def _complete_run(self, run: EventRun, event: EventDefinition) -> None:
         """Fold a just-completed run's results into session/all-time totals."""
         prize = run.prize(event)
