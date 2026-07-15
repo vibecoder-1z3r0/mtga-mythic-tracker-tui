@@ -3,6 +3,7 @@
 Test script for the manual TUI's event-mode models (EventDefinition,
 EventRun, EventStats) and StateManager persistence round-trip.
 """
+import json
 import tempfile
 from pathlib import Path
 
@@ -277,6 +278,35 @@ def test_state_manager_persists_event_stats():
         assert loaded.event_stats.recent_runs[0].games[0].result == EventGameResult.WIN
 
 
+def test_state_manager_survives_renamed_field_in_saved_file():
+    """Regression test: a saved file containing a field name that no
+    longer exists on the dataclass (e.g. from a version before a field
+    was renamed) must not wipe the rest of the user's data. This
+    reproduces a real incident: renaming EventStats.session_goal_wins to
+    run_goal_wins broke loading for anyone who'd already saved with the
+    old name, and the broad except in load_state() silently discarded
+    the ENTIRE save file (ranks, sessions, event history) in response."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        sm = StateManager(data_dir=Path(temp_dir), save_enabled=True)
+        app_data = sm.load_state()
+        app_data.event_stats.event_id = "historic_pauper_challenge"
+        app_data.event_stats.alltime_wins = 42
+        sm.save_state(app_data)
+
+        state_file = Path(temp_dir) / "tracker_state.json"
+        data = json.loads(state_file.read_text())
+        # Simulate a field that existed in an older version and no longer
+        # matches any current EventStats field.
+        data["event_stats"]["some_field_that_no_longer_exists"] = "stale value"
+        state_file.write_text(json.dumps(data, indent=2))
+
+        sm2 = StateManager(data_dir=Path(temp_dir), save_enabled=True)
+        loaded = sm2.load_state()
+
+        assert loaded.event_stats.alltime_wins == 42
+        assert loaded.event_stats.event_id == "historic_pauper_challenge"
+
+
 def main():
     """Run all event model tests."""
     test_load_event_catalog()
@@ -293,6 +323,7 @@ def main():
     test_event_stats_wipe_alltime_clears_everything()
     test_event_stats_rejects_game_with_no_active_run()
     test_state_manager_persists_event_stats()
+    test_state_manager_survives_renamed_field_in_saved_file()
     print("All manual-TUI event model tests passed!")
 
 

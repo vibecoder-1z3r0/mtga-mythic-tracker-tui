@@ -6,10 +6,11 @@ Handles saving and loading application state to/from JSON files.
 
 import json
 import os
+import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
-from dataclasses import asdict
+from dataclasses import asdict, fields
 
 from models import FormatType, RankTier, ManualRank, CompletedSession, SessionStats, AppData
 from models import (
@@ -19,6 +20,20 @@ from models import (
     EventRunStatus,
     EventStats,
 )
+
+
+def _known_fields(cls, data: dict) -> dict:
+    """Drop any keys in `data` that aren't real fields of dataclass `cls`.
+
+    A renamed or removed field in a newer app version would otherwise
+    raise TypeError on `cls(**data)`, which load_state()'s broad except
+    catches by silently discarding the ENTIRE saved state (ranks,
+    sessions, event history - everything), not just the one stale field.
+    Dropping unknown keys here means old saves degrade gracefully (that
+    one field resets to its default) instead of nuking the whole file.
+    """
+    valid = {f.name for f in fields(cls)}
+    return {k: v for k, v in data.items() if k in valid}
 
 
 class StateManager:
@@ -58,27 +73,27 @@ class StateManager:
             self._migrate_format_values(data)
             
             # Reconstruct objects
-            constructed_rank = ManualRank(**data['constructed_rank'])
-            limited_rank = ManualRank(**data['limited_rank'])
-            
+            constructed_rank = ManualRank(**_known_fields(ManualRank, data['constructed_rank']))
+            limited_rank = ManualRank(**_known_fields(ManualRank, data['limited_rank']))
+
             # Handle SessionStats with potential missing fields
             stats_data = data['stats']
-            
+
             # Reconstruct CompletedSession objects from session_history
             if 'session_history' in stats_data and stats_data['session_history']:
                 session_history = []
                 for session_dict in stats_data['session_history']:
-                    session_history.append(CompletedSession(**session_dict))
+                    session_history.append(CompletedSession(**_known_fields(CompletedSession, session_dict)))
                 stats_data['session_history'] = session_history
-            
+
             # Reconstruct ManualRank objects for season_start_rank and season_highest_rank
             if 'season_start_rank' in stats_data and isinstance(stats_data['season_start_rank'], dict):
-                stats_data['season_start_rank'] = ManualRank(**stats_data['season_start_rank'])
-            
+                stats_data['season_start_rank'] = ManualRank(**_known_fields(ManualRank, stats_data['season_start_rank']))
+
             if 'season_highest_rank' in stats_data and isinstance(stats_data['season_highest_rank'], dict):
-                stats_data['season_highest_rank'] = ManualRank(**stats_data['season_highest_rank'])
-            
-            stats = SessionStats(**stats_data)
+                stats_data['season_highest_rank'] = ManualRank(**_known_fields(ManualRank, stats_data['season_highest_rank']))
+
+            stats = SessionStats(**_known_fields(SessionStats, stats_data))
             
             event_stats_data = data.get('event_stats')
             event_stats = (
@@ -101,7 +116,24 @@ class StateManager:
             
         except Exception as e:
             print(f"Error loading state: {e}")
+            self._backup_unreadable_state()
             return self._create_default_state()
+
+    def _backup_unreadable_state(self) -> None:
+        """Preserve a state file that failed to load by copying it aside,
+        so a bug in reconstruction (e.g. a renamed field) makes the data
+        need manual recovery instead of silently destroying it - the
+        very next autosave would otherwise overwrite it with a blank
+        default state within seconds."""
+        try:
+            if self.state_file.exists():
+                backup_path = self.state_file.with_name(
+                    f"tracker_state.corrupted-{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                )
+                shutil.copy2(self.state_file, backup_path)
+                print(f"Backed up unreadable state to {backup_path}")
+        except Exception:
+            pass
     
     def save_state(self, app_data: AppData):
         """Save application state to file."""
@@ -246,7 +278,7 @@ class StateManager:
         """Rebuild an EventGame from its serialized dict form."""
         game_dict = dict(game_dict)
         game_dict['result'] = EventGameResult(game_dict['result'])
-        return EventGame(**game_dict)
+        return EventGame(**_known_fields(EventGame, game_dict))
 
     def _reconstruct_event_run(self, run_dict: dict) -> EventRun:
         """Rebuild an EventRun (and its nested games) from serialized form."""
@@ -255,7 +287,7 @@ class StateManager:
         run_dict['status'] = EventRunStatus(run_dict['status'])
         # entry_currency is now a plain free-form string (gold/gems/tokens),
         # no enum reconstruction needed.
-        return EventRun(**run_dict)
+        return EventRun(**_known_fields(EventRun, run_dict))
 
     def _reconstruct_event_stats(self, stats_dict: dict) -> EventStats:
         """Rebuild EventStats (and its nested runs) from serialized form."""
@@ -265,4 +297,4 @@ class StateManager:
         stats_dict['recent_runs'] = [
             self._reconstruct_event_run(r) for r in stats_dict.get('recent_runs', [])
         ]
-        return EventStats(**stats_dict)
+        return EventStats(**_known_fields(EventStats, stats_dict))
