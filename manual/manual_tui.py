@@ -1000,6 +1000,14 @@ def _format_play_draw(play_draw: Optional[str]) -> str:
     return "Unknown"
 
 
+def _win_pct(wins: int, losses: int) -> str:
+    """' (55.6%)' suffix for a W-L record, or '' if no games played yet."""
+    total = wins + losses
+    if total == 0:
+        return ""
+    return f" ({100 * wins / total:.1f}%)"
+
+
 def _all_event_games_chronological(stats: EventStats) -> List[EventGame]:
     """Every recorded game across recent completed runs plus the current
     run, oldest first. recent_runs is already oldest-appended-first
@@ -1023,8 +1031,6 @@ class EventRunPanel(Static):
 
     def compose(self) -> ComposeResult:
         with Vertical():
-            yield Static("─ Event Mode: Current Run ─", classes="panel-header")
-            yield Static("─" * 30, classes="separator")
             yield self._create_run_section()
             yield Static("─" * 30, classes="separator")
             yield Static(
@@ -1040,7 +1046,7 @@ class EventRunPanel(Static):
             return Static("No events configured in events.json", classes="session-section")
 
         run = self.app_data.event_stats.current_run
-        lines = [f"🎮 {event.name} ({event.format})", ""]
+        lines = ["🎮 CURRENT RUN", ""]
 
         if not run:
             lines.append("No active run. Press [U] to start a new run.")
@@ -1107,8 +1113,6 @@ class EventStatsPanel(Static):
 
     def compose(self) -> ComposeResult:
         with Vertical():
-            yield Static("─ Event Session & All-Time Stats ─", classes="panel-header")
-            yield Static("─" * 30, classes="separator")
             yield self._create_session_section()
             yield Static("─" * 30, classes="separator")
             yield self._create_alltime_section()
@@ -1161,7 +1165,8 @@ class EventStatsPanel(Static):
         lines.extend(
             [
                 f"Runs played: {stats.session_runs_played}",
-                f"Record: [{stats.session_wins}W] - [{stats.session_losses}L]",
+                f"Record: [{stats.session_wins}W] - [{stats.session_losses}L]"
+                f"{_win_pct(stats.session_wins, stats.session_losses)}",
                 f"Prize: {stats.session_gems} gems, {stats.session_packs} packs",
             ]
         )
@@ -1175,7 +1180,8 @@ class EventStatsPanel(Static):
         lines = [
             "🏆 ALL-TIME TOTAL",
             f"Runs played: {stats.alltime_runs_played}",
-            f"Record: [{stats.alltime_wins}W] - [{stats.alltime_losses}L]",
+            f"Record: [{stats.alltime_wins}W] - [{stats.alltime_losses}L]"
+            f"{_win_pct(stats.alltime_wins, stats.alltime_losses)}",
             f"Prize: {stats.alltime_gems} gems, {stats.alltime_packs} packs",
         ]
         if stats.alltime_milestone_counts:

@@ -105,6 +105,17 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   magenta "D" / dim "?" for unrecorded), plus an overall "On the Play %"
   computed across *all* games with a known play/draw (not just the last
   10), since that's a running total rather than a windowed one.
+- Panel headers ("─ Event Mode: Current Run ─", "─ Event Session &
+  All-Time Stats ─") were removed from `EventRunPanel`/`EventStatsPanel`
+  as redundant screen real estate — the top bar already names the event,
+  and the run panel's own duplicate "🎮 {event.name} ({event.format})"
+  line was replaced with a plain "🎮 CURRENT RUN" label. Freeing that
+  vertical space is also what fixed the Trends section getting clipped
+  at typical terminal heights, since `.left-panel`/`.right-panel` scroll
+  (`overflow-y: auto`) but a shorter, unscrolled render is what you
+  actually see in a normal-height terminal. `_win_pct()` adds a
+  "(55.6%)" suffix to the session/all-time Record lines, blank if no
+  games have been completed yet (division by zero guard).
 - Seven ranked-only actions (`toggle_mythic`, `set_season_start`,
   `edit_stats`, `collapse_tiers`, `hide_tiers`, `set_rank`, and
   `view_all_notes` — bound to M/T/E/C/H/S and Ctrl+N respectively) have no
