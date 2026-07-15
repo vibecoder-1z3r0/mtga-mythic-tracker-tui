@@ -1016,8 +1016,8 @@ class EventRunPanel(Static):
             yield Static("─" * 30, classes="separator")
             yield Static(
                 "[U] Start Run  [W] Win  [L] Loss  [D] Set Deck  [N] Opp Deck/Play-Draw  "
-                "[Ctrl+N] Game History  [R] Restart Session  [Ctrl+R] Wipe All-Time  "
-                "[F] Switch Mode",
+                "[G] Set Win Goal  [Ctrl+N] Game History  [R] Restart Session  "
+                "[Ctrl+R] Wipe All-Time  [F] Switch Mode",
                 classes="help-text",
             )
 
@@ -1094,12 +1094,20 @@ class EventStatsPanel(Static):
 
     def _create_session_section(self) -> Static:
         stats = self.app_data.event_stats
-        lines = [
-            "📊 CURRENT SESSION",
-            f"Runs played: {stats.session_runs_played}",
-            f"Record: [{stats.session_wins}W] - [{stats.session_losses}L]",
-            f"Prize: {stats.session_gems} gems, {stats.session_packs} packs",
-        ]
+        lines = ["📊 CURRENT SESSION"]
+        if stats.session_goal_wins is not None:
+            remaining = stats.session_goal_wins - stats.session_wins
+            if remaining <= 0:
+                lines.append(f"🎯 GOAL: {stats.session_goal_wins} wins - achieved!")
+            else:
+                lines.append(f"🎯 GOAL: {stats.session_goal_wins} wins ({remaining} to go)")
+        lines.extend(
+            [
+                f"Runs played: {stats.session_runs_played}",
+                f"Record: [{stats.session_wins}W] - [{stats.session_losses}L]",
+                f"Prize: {stats.session_gems} gems, {stats.session_packs} packs",
+            ]
+        )
         if stats.session_milestone_counts:
             counts_str = ", ".join(f"{k}: {v}" for k, v in stats.session_milestone_counts.items())
             lines.append(f"Milestones: {counts_str}")
@@ -2078,6 +2086,67 @@ class GameNotesModal(ModalScreen):
         """Cancel and close modal."""
         self.dismiss(None)
 
+class SetEventGoalModal(ModalScreen):
+    """Modal for setting a session win-count goal in Event Mode (G key)."""
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    CSS = """
+    SetEventGoalModal {
+        align: center middle;
+    }
+
+    .event-goal-modal-container {
+        width: 60;
+        height: 14;
+        border: solid $primary;
+        background: $surface;
+        padding: 2;
+    }
+
+    .event-goal-modal-buttons {
+        height: 3;
+        margin-top: 1;
+        align: center middle;
+    }
+    """
+
+    def __init__(self, current_goal: Optional[int] = None, **kwargs):
+        super().__init__(**kwargs)
+        self.current_goal = current_goal
+
+    def compose(self) -> ComposeResult:
+        with Container(classes="event-goal-modal-container"):
+            yield Static("Set a session win goal", classes="modal-title")
+            yield Input(
+                value=str(self.current_goal) if self.current_goal is not None else "",
+                placeholder="e.g. 20 (total wins this session)",
+                id="event-goal-input",
+                type="integer",
+            )
+            with Horizontal(classes="event-goal-modal-buttons"):
+                yield Button("Set Goal", id="save", variant="success")
+                yield Button("Clear Goal", id="clear", variant="warning")
+                yield Button("Cancel", id="cancel", variant="error")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "save":
+            value = self.query_one("#event-goal-input", Input).value.strip()
+            if value.isdigit() and int(value) > 0:
+                self.dismiss(int(value))
+            else:
+                self.notify("Enter a whole number greater than 0", severity="warning")
+        elif event.button.id == "clear":
+            self.dismiss("clear")
+        else:
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        """Cancel and close modal without changing anything."""
+        self.dismiss(None)
+
 class SetEventDeckModal(ModalScreen):
     """Modal for setting/editing the deck being played in an event run."""
 
@@ -2327,7 +2396,7 @@ class EventGamesViewerModal(ModalScreen):
                 classes="help-text",
             )
             table = DataTable(id="event-games-table", classes="event-games-list")
-            table.add_columns("Run", "#", "Result", "Play/Draw", "Opponent Deck")
+            table.add_columns("Run", "#", "Result", "Play/Draw", "Your Deck", "Opponent Deck")
             table.cursor_type = "row"
             yield table
             with Horizontal(classes="event-games-buttons"):
@@ -2359,6 +2428,7 @@ class EventGamesViewerModal(ModalScreen):
                     str(i),
                     game.result.value,
                     _format_play_draw(game.play_draw),
+                    run.player_deck or "Unknown",
                     game.opponent_deck or "Unknown",
                 )
 
@@ -2775,12 +2845,30 @@ class ManualTUIApp(App):
         Binding("ctrl+r", "wipe_event_alltime", "Wipe All-Time (Event Mode)"),
     ]
 
+    # Ranked-only actions with no Event Mode behavior at all - hidden from
+    # the Footer while in Event Mode. G (set_goal) is deliberately not
+    # here: it's context-sensitive and does something useful in both modes.
+    RANKED_ONLY_ACTIONS = {
+        "toggle_mythic",
+        "set_season_start",
+        "edit_stats",
+        "collapse_tiers",
+        "hide_tiers",
+        "set_rank",
+    }
+
     def __init__(self, state_manager: StateManager):
         super().__init__()
         self.state_manager = state_manager
         self.app_data = state_manager.load_state()
         self.event_catalog = load_event_catalog(default_catalog_path())
         self._pending_event_game_notes: Optional[dict] = None
+
+    def check_action(self, action: str, parameters: tuple) -> Optional[bool]:
+        """Hide ranked-only keybindings from the Footer while in Event Mode."""
+        if self.app_data.view_mode == "event" and action in self.RANKED_ONLY_ACTIONS:
+            return False
+        return True
 
     def compose(self) -> ComposeResult:
         with Container():
@@ -2948,7 +3036,11 @@ class ManualTUIApp(App):
         self.push_screen(modal, handle_result)
     
     def action_set_goal(self) -> None:
-        """Set session goal rank via modal."""
+        """Set session goal rank (ranked), or session win goal (Event Mode)."""
+        if self.app_data.view_mode == "event":
+            self._event_set_goal()
+            return
+
         current_rank = self.app_data.get_current_rank()
         
         # Create and push the goal setting modal
@@ -3259,6 +3351,25 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
 
         self.push_screen(modal, handle_result)
 
+    def _event_set_goal(self) -> None:
+        """Set/clear a session win-count goal (Event Mode, G key). Persists
+        across restart_session() like ranked's rank goal does - only
+        progress toward it resets, not the goal itself."""
+        stats = self.app_data.event_stats
+        modal = SetEventGoalModal(stats.session_goal_wins)
+
+        def handle_result(result):
+            if result == "clear":
+                stats.session_goal_wins = None
+                self.refresh_panels()
+                self.notify("Session win goal cleared", severity="information")
+            elif result is not None:
+                stats.session_goal_wins = result
+                self.refresh_panels()
+                self.notify(f"Session win goal set: {result} wins", severity="success")
+
+        self.push_screen(modal, handle_result)
+
     def _default_entry_currency(self, event: EventDefinition) -> Optional[str]:
         """Pick a default entry currency for a new run: prefer Gems, else
         this event's first configured entry option.
@@ -3310,6 +3421,9 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
     def _finish_event_game(self, result: EventGameResult, event: EventDefinition, notes: dict) -> None:
         """Actually record the game once opponent deck / play-draw are known."""
         stats = self.app_data.event_stats
+        goal = stats.session_goal_wins
+        was_goal_achieved = goal is not None and stats.session_wins >= goal
+
         game = EventGame(
             result=result,
             opponent_deck=notes.get("opponent_deck"),
@@ -3317,6 +3431,10 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
             notes=notes.get("notes") or "",
         )
         stats.record_game(game, event)
+
+        if goal is not None and not was_goal_achieved and stats.session_wins >= goal:
+            self.notify(f"🎉 SESSION GOAL ACHIEVED: {goal} wins! 🎉", severity="success")
+
         self.refresh_panels()
 
     def _event_add_game_notes(self) -> None:
@@ -3554,10 +3672,13 @@ Ctrl+Q - Quit           I - About/Info
 Event Mode:
 F - Switch mode (choose Event)   U - Start new run
 W/L - Win/loss (current run)  D - Set deck being run
+G - Set/clear a session win goal (celebrates when reached)
 N - Set opponent deck/play-draw/notes (applies to the next game)
-Ctrl+N - View/edit game history (deck, play-draw, notes - not result)
+Ctrl+N - View/edit game history (deck, play-draw, notes, result)
 R - Restart event session
 Ctrl+R - Wipe all-time event totals (cannot be undone)
+
+M/T/E/C/H/S are ranked-only and not available in Event Mode.
 
 Manual Editing:
 Click any [bracketed] value to edit inline

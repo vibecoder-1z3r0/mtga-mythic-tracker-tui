@@ -75,7 +75,28 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   old vs. new prize/wins/losses/milestones and applies just the delta to
   `session_*`/`alltime_*` so those counters stay correct without
   re-deriving the whole history. There's still no delete, since removing
-  a game entirely has no clean "old" run state to diff against.
+  a game entirely has no clean "old" run state to diff against. The
+  `EventGamesViewerModal` table also shows each row's "Your Deck"
+  (`run.player_deck`) alongside the opponent's, since every game in a run
+  shares one deck.
+- **G** is context-sensitive: ranked mode keeps the existing rank-tier
+  goal, while Event Mode opens `SetEventGoalModal` to set/clear a session
+  win-count goal (`EventStats.session_goal_wins`) - e.g. "reach 20 wins
+  this session." Like ranked's `session_goal_tier`, it persists across
+  `restart_session()` (only progress resets, not the goal itself) and is
+  only cleared by `wipe_alltime()`. Achievement is detected the same way
+  ranked does it in `action_add_win()` - compare `session_wins >= goal`
+  before and after recording a game, and celebrate only on the
+  false→true transition - rather than a separately-tracked "achieved"
+  flag that would need its own reset handling.
+- Six ranked-only actions (`toggle_mythic`, `set_season_start`,
+  `edit_stats`, `collapse_tiers`, `hide_tiers`, `set_rank` — bound to
+  M/T/E/C/H/S) have no Event Mode behavior at all, so `ManualTUIApp`
+  overrides `check_action()` to return `False` for them while
+  `view_mode == "event"`, which disables *and hides* them from the
+  Textual `Footer` widget (vs. `None`, which would just grey them out).
+  `set_goal` (G) is deliberately excluded from that list since it's
+  context-sensitive rather than ranked-only.
 - Tests: `test_event_models.py` (pytest), covering prize/milestone
   lookup, run completion, session/all-time aggregation, and a
   StateManager save/load round-trip.

@@ -190,6 +190,22 @@ def test_event_stats_restart_session_discards_active_run():
     assert stats.current_run is None
 
 
+def test_event_stats_session_goal_wins_persists_across_restart():
+    """Test that a session win goal survives restart_session() (mirrors
+    ranked's session_goal_tier, which also isn't cleared on reset) - only
+    wipe_alltime() should clear it."""
+    stats = EventStats()
+    stats.session_goal_wins = 20
+    stats.session_wins = 5
+
+    stats.restart_session()
+    assert stats.session_goal_wins == 20
+    assert stats.session_wins == 0
+
+    stats.wipe_alltime()
+    assert stats.session_goal_wins is None
+
+
 def test_event_stats_wipe_alltime_clears_everything():
     """Test that wiping all-time totals also clears session totals, the
     current run, and recent-runs history (unlike restart_session, which
@@ -272,6 +288,9 @@ def main():
     test_event_run_profit_when_paid_in_gold_uses_gems_price()
     test_event_run_profit_with_token_entry()
     test_event_stats_session_and_alltime_aggregation()
+    test_event_stats_restart_session_discards_active_run()
+    test_event_stats_session_goal_wins_persists_across_restart()
+    test_event_stats_wipe_alltime_clears_everything()
     test_event_stats_rejects_game_with_no_active_run()
     test_state_manager_persists_event_stats()
     print("All manual-TUI event model tests passed!")
