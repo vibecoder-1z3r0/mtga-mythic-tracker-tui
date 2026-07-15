@@ -2154,7 +2154,7 @@ class EventGameNotesModal(ModalScreen):
 
     .event-notes-modal-container {
         width: 60;
-        height: 30;
+        height: 34;
         border: solid $primary;
         background: $surface;
         padding: 2;
@@ -2187,17 +2187,33 @@ class EventGameNotesModal(ModalScreen):
     }
     """
 
-    def __init__(self, existing: Optional[dict] = None, forced: bool = False, **kwargs):
+    def __init__(
+        self,
+        existing: Optional[dict] = None,
+        forced: bool = False,
+        include_result: bool = False,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.existing = existing or {}
         self.forced = forced
+        self.include_result = include_result
 
     def compose(self) -> ComposeResult:
         with Container(classes="event-notes-modal-container"):
             yield Static(
-                "Game Info (Unknown is fine)" if self.forced else "Set Opponent Deck / Play-Draw",
+                "Game Info (Unknown is fine)" if self.forced else "Edit Game",
                 classes="modal-title",
             )
+            if self.include_result:
+                with Horizontal(classes="event-notes-row"):
+                    yield Static("Result:", classes="event-notes-label")
+                    yield Select(
+                        [("Win", "Win"), ("Loss", "Loss")],
+                        value=self.existing.get("result") or "Win",
+                        id="event-result-select",
+                        allow_blank=False,
+                    )
             with Horizontal(classes="event-notes-row"):
                 yield Static("Opponent Deck:", classes="event-notes-label")
                 yield Input(
@@ -2233,13 +2249,14 @@ class EventGameNotesModal(ModalScreen):
         opp_deck = self.query_one("#event-opp-deck-input", Input).value.strip()
         play_draw = self.query_one("#event-play-draw-select", Select).value
         notes = self.query_one("#event-game-notes-textarea", TextArea).text.strip()
-        self.dismiss(
-            {
-                "opponent_deck": opp_deck or None,
-                "play_draw": play_draw if play_draw != "Unknown" else None,
-                "notes": notes,
-            }
-        )
+        result = {
+            "opponent_deck": opp_deck or None,
+            "play_draw": play_draw if play_draw != "Unknown" else None,
+            "notes": notes,
+        }
+        if self.include_result:
+            result["result"] = self.query_one("#event-result-select", Select).value
+        self.dismiss(result)
 
     def action_cancel(self) -> None:
         """Escape saves whatever's filled in when forced (the win/loss is
@@ -2254,10 +2271,15 @@ class EventGamesViewerModal(ModalScreen):
     """Modal for viewing and editing per-game info across the current run
     and recent completed runs (Event Mode, Ctrl+N).
 
-    Only opponent deck, play/draw, and notes are editable - never the
-    result, since changing a past win/loss would desync the session/
-    all-time totals it's already been folded into (no delete, for the
-    same reason).
+    Result is editable too, but for a completed run that means the run's
+    win/loss counts (computed live from its games) shift after totals
+    were already folded into session_*/alltime_* - so editing a
+    completed run's game un-folds the run's old contribution and re-folds
+    its new one (prize, milestones) to keep those counters correct. A
+    still-active run's games can just be edited directly, since nothing's
+    been folded in yet. There's still no delete, since removing a game
+    entirely would need the same treatment with no clean "old" to diff
+    against a run that's yet to reach its own cap.
     """
 
     BINDINGS = [
@@ -2290,16 +2312,20 @@ class EventGamesViewerModal(ModalScreen):
     }
     """
 
-    def __init__(self, event_stats: EventStats, **kwargs):
+    def __init__(self, event_stats: EventStats, event: Optional[EventDefinition], **kwargs):
         super().__init__(**kwargs)
         self.event_stats = event_stats
+        self.event = event
         self.has_changes = False
-        self._games: List[EventGame] = []
+        self._rows: List[Tuple[EventRun, EventGame]] = []
 
     def compose(self) -> ComposeResult:
         with Container(id="event-games-dialog"):
             yield Label("Event Game History", classes="modal-title")
-            yield Label("Use ↑↓ to select, then click Edit (deck/play-draw/notes)", classes="help-text")
+            yield Label(
+                "Use ↑↓ to select, then click Edit (result/deck/play-draw/notes)",
+                classes="help-text",
+            )
             table = DataTable(id="event-games-table", classes="event-games-list")
             table.add_columns("Run", "#", "Result", "Play/Draw", "Opponent Deck")
             table.cursor_type = "row"
@@ -2324,10 +2350,10 @@ class EventGamesViewerModal(ModalScreen):
     def _populate(self) -> None:
         table = self.query_one("#event-games-table", DataTable)
         table.clear()
-        self._games = []
+        self._rows = []
         for run in self._runs_newest_first():
             for i, game in enumerate(run.games, 1):
-                self._games.append(game)
+                self._rows.append((run, game))
                 table.add_row(
                     run.run_id,
                     str(i),
@@ -2344,27 +2370,72 @@ class EventGamesViewerModal(ModalScreen):
 
     def action_edit_selected(self) -> None:
         table = self.query_one("#event-games-table", DataTable)
-        if table.cursor_row is None or table.cursor_row >= len(self._games):
+        if table.cursor_row is None or table.cursor_row >= len(self._rows):
             return
-        game = self._games[table.cursor_row]
+        run, game = self._rows[table.cursor_row]
 
         modal = EventGameNotesModal(
             {
+                "result": game.result.value,
                 "opponent_deck": game.opponent_deck,
                 "play_draw": game.play_draw,
                 "notes": game.notes,
-            }
+            },
+            include_result=True,
         )
 
         def handle_result(result):
             if result is not None:
-                game.opponent_deck = result.get("opponent_deck")
-                game.play_draw = result.get("play_draw")
-                game.notes = result.get("notes") or ""
+                self._apply_edit(run, game, result)
                 self.has_changes = True
                 self._populate()
 
         self.app.push_screen(modal, handle_result)
+
+    def _apply_edit(self, run: "EventRun", game: EventGame, result: dict) -> None:
+        game.opponent_deck = result.get("opponent_deck")
+        game.play_draw = result.get("play_draw")
+        game.notes = result.get("notes") or ""
+
+        new_result = EventGameResult(result["result"])
+        if new_result == game.result:
+            return
+
+        if run.status != EventRunStatus.ENDED or self.event is None:
+            # Run hasn't been folded into session/alltime totals yet -
+            # wins/losses are computed live from run.games, so nothing
+            # else needs adjusting.
+            game.result = new_result
+            return
+
+        # Run already folded into totals: un-fold its old contribution,
+        # apply the edit, then re-fold the new contribution.
+        old_prize = run.prize(self.event)
+        old_wins, old_losses = run.wins, run.losses
+        old_milestones = {m.name for m in self.event.milestones_met(old_wins)}
+
+        game.result = new_result
+
+        new_prize = run.prize(self.event)
+        new_wins, new_losses = run.wins, run.losses
+        new_milestones = {m.name for m in self.event.milestones_met(new_wins)}
+
+        stats = self.event_stats
+        stats.session_wins += new_wins - old_wins
+        stats.session_losses += new_losses - old_losses
+        stats.session_gems += new_prize.gems - old_prize.gems
+        stats.session_packs += new_prize.packs - old_prize.packs
+        stats.alltime_wins += new_wins - old_wins
+        stats.alltime_losses += new_losses - old_losses
+        stats.alltime_gems += new_prize.gems - old_prize.gems
+        stats.alltime_packs += new_prize.packs - old_prize.packs
+
+        for name in old_milestones - new_milestones:
+            stats.session_milestone_counts[name] = max(0, stats.session_milestone_counts.get(name, 0) - 1)
+            stats.alltime_milestone_counts[name] = max(0, stats.alltime_milestone_counts.get(name, 0) - 1)
+        for name in new_milestones - old_milestones:
+            stats.session_milestone_counts[name] = stats.session_milestone_counts.get(name, 0) + 1
+            stats.alltime_milestone_counts[name] = stats.alltime_milestone_counts.get(name, 0) + 1
 
     def action_cancel(self) -> None:
         self.dismiss("updated" if self.has_changes else None)
@@ -3268,10 +3339,11 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
 
     def _event_view_games(self) -> None:
         """Show and edit game history (this run + recent completed runs),
-        Event Mode Ctrl+N. Result is never editable here - only opponent
-        deck, play/draw, and notes - since changing a past win/loss would
-        desync the session/all-time totals it's already been folded into."""
-        modal = EventGamesViewerModal(self.app_data.event_stats)
+        Event Mode Ctrl+N, including result - the modal itself keeps the
+        session/all-time totals in sync when a completed run's result
+        changes."""
+        event = self._get_current_event_definition()
+        modal = EventGamesViewerModal(self.app_data.event_stats, event)
 
         def handle_result(result):
             if result == "updated":

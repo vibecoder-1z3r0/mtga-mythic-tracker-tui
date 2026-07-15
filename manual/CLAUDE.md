@@ -66,10 +66,16 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   Unknown/blank is a one-keypress-away valid answer for both fields
   either way. **Ctrl+N** opens `EventGamesViewerModal`, a `DataTable` of
   every game (current run, then recent completed runs) with an "Edit
-  Selected" button that reopens `EventGameNotesModal` pre-filled for that
-  game. Only opponent deck / play-draw / notes are editable this way —
-  never `result` (and there's no delete) — since changing a past win/loss
-  would desync the session/all-time totals it's already been folded into.
+  Selected" button that reopens `EventGameNotesModal` (with `include_result
+  =True`) pre-filled for that game — result, opponent deck, play/draw, and
+  notes are all editable. Editing an active run's game is a plain
+  mutation (wins/losses are computed live from `run.games`, nothing's
+  been folded into totals yet); editing a *completed* run's result goes
+  through `EventGamesViewerModal._apply_edit()`, which diffs the run's
+  old vs. new prize/wins/losses/milestones and applies just the delta to
+  `session_*`/`alltime_*` so those counters stay correct without
+  re-deriving the whole history. There's still no delete, since removing
+  a game entirely has no clean "old" run state to diff against.
 - Tests: `test_event_models.py` (pytest), covering prize/milestone
   lookup, run completion, session/all-time aggregation, and a
   StateManager save/load round-trip.
