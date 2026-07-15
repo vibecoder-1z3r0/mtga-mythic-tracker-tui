@@ -1000,6 +1000,19 @@ def _format_play_draw(play_draw: Optional[str]) -> str:
     return "Unknown"
 
 
+def _all_event_games_chronological(stats: EventStats) -> List[EventGame]:
+    """Every recorded game across recent completed runs plus the current
+    run, oldest first. recent_runs is already oldest-appended-first
+    (capped to the last 5 runs), so this just tacks the in-progress
+    run's games on the end."""
+    games: List[EventGame] = []
+    for run in stats.recent_runs:
+        games.extend(run.games)
+    if stats.current_run:
+        games.extend(stats.current_run.games)
+    return games
+
+
 class EventRunPanel(Static):
     """Left panel showing the current event run (Event Mode)."""
 
@@ -1100,6 +1113,45 @@ class EventStatsPanel(Static):
             yield Static("─" * 30, classes="separator")
             yield self._create_alltime_section()
             yield Static("─" * 30, classes="separator")
+            yield self._create_trends_section()
+            yield Static("─" * 30, classes="separator")
+
+    def _create_trends_section(self) -> Static:
+        stats = self.app_data.event_stats
+        games = _all_event_games_chronological(stats)
+
+        if not games:
+            return Static("📈 TRENDS\nNo games recorded yet.", classes="session-section")
+
+        recent = games[-10:]
+
+        result_glyphs = "".join(
+            "[rgb(255,215,0)]W[/rgb(255,215,0)]" if g.result == EventGameResult.WIN else "[red]L[/red]"
+            for g in recent
+        )
+
+        play_draw_glyphs = "".join(
+            "[cyan]P[/cyan]"
+            if g.play_draw == "Play"
+            else "[magenta]D[/magenta]" if g.play_draw == "Draw" else "[dim]?[/dim]"
+            for g in recent
+        )
+
+        known_play_draw = [g for g in games if g.play_draw in ("Play", "Draw")]
+        play_count = sum(1 for g in known_play_draw if g.play_draw == "Play")
+
+        lines = [
+            "📈 TRENDS (Last 10 Games)",
+            f"Results:   {result_glyphs}",
+            f"Play/Draw: {play_draw_glyphs}",
+        ]
+        if known_play_draw:
+            pct = round(100 * play_count / len(known_play_draw))
+            lines.append(f"On the Play: {pct}% ({play_count}/{len(known_play_draw)} known)")
+        else:
+            lines.append("On the Play: no data yet")
+
+        return Static("\n".join(lines), classes="session-section")
 
     def _create_session_section(self) -> Static:
         stats = self.app_data.event_stats

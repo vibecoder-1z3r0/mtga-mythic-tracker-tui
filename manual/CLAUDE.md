@@ -97,6 +97,14 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   recording a game, and celebrate only on the false→true transition -
   rather than a separately-tracked "achieved" flag that would need its
   own reset handling.
+- `EventStatsPanel` has a "Trends (Last 10 Games)" section built from
+  `_all_event_games_chronological()` (recent_runs, oldest-first since
+  that's how they're appended, then the current run's games tacked on
+  the end) sliced to `[-10:]`: a W/L glyph string (gold/red, matching
+  the win/loss pip colors) and a Play/Draw glyph string (cyan "P" /
+  magenta "D" / dim "?" for unrecorded), plus an overall "On the Play %"
+  computed across *all* games with a known play/draw (not just the last
+  10), since that's a running total rather than a windowed one.
 - Seven ranked-only actions (`toggle_mythic`, `set_season_start`,
   `edit_stats`, `collapse_tiers`, `hide_tiers`, `set_rank`, and
   `view_all_notes` — bound to M/T/E/C/H/S and Ctrl+N respectively) have no
