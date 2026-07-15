@@ -78,6 +78,18 @@ def test_milestones():
     assert event.highest_milestone(7).name == "Trophy"
 
 
+def test_event_game_records_play_draw_and_opponent_deck():
+    """Test that EventGame carries play/draw and opponent deck, defaulting
+    to None (displayed as "Unknown") when not recorded."""
+    game_unknown = EventGame(result=EventGameResult.WIN)
+    assert game_unknown.play_draw is None
+    assert game_unknown.opponent_deck is None
+
+    game_known = EventGame(result=EventGameResult.LOSS, play_draw="Draw", opponent_deck="Mono Red")
+    assert game_known.play_draw == "Draw"
+    assert game_known.opponent_deck == "Mono Red"
+
+
 def test_event_run_completes_at_win_cap():
     """Test that a run ends automatically once win_cap is reached."""
     event = load_test_event()
@@ -268,6 +280,7 @@ def main():
     test_load_event_catalog()
     test_prize_for_wins()
     test_milestones()
+    test_event_game_records_play_draw_and_opponent_deck()
     test_event_run_completes_at_win_cap()
     test_event_run_completes_at_loss_cap()
     test_event_run_prize_and_profit()

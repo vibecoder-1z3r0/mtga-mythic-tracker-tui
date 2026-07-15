@@ -1006,8 +1006,9 @@ class EventRunPanel(Static):
             yield self._create_run_section()
             yield Static("─" * 30, classes="separator")
             yield Static(
-                "[U] Start Run  [W] Win  [L] Loss  [R] Restart Session  "
-                "[Ctrl+R] Wipe All-Time  [F] Switch Mode",
+                "[U] Start Run  [W] Win  [L] Loss  [D] Set Deck  [N] Opp Deck/Play-Draw  "
+                "[Ctrl+N] Game History  [R] Restart Session  [Ctrl+R] Wipe All-Time  "
+                "[F] Switch Mode",
                 classes="help-text",
             )
 
@@ -1040,6 +1041,12 @@ class EventRunPanel(Static):
         lines.append(f"Losses: {loss_bars}")
         lines.append("")
         lines.append(f"Record: {run.wins}-{run.losses}")
+
+        if run.games:
+            last_game = run.games[-1]
+            play_draw = last_game.play_draw or "Unknown"
+            opp_deck = last_game.opponent_deck or "Unknown"
+            lines.append(f"Last game: {play_draw}, vs {opp_deck}")
 
         prize = run.prize(event)
         lines.append(f"Prize so far: {prize.gems} gems, {prize.packs} packs")
@@ -2062,6 +2069,162 @@ class GameNotesModal(ModalScreen):
         """Cancel and close modal."""
         self.dismiss(None)
 
+class SetEventDeckModal(ModalScreen):
+    """Modal for setting/editing the deck being played in an event run."""
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    CSS = """
+    SetEventDeckModal {
+        align: center middle;
+    }
+
+    .event-deck-modal-container {
+        width: 60;
+        height: 18;
+        border: solid $primary;
+        background: $surface;
+        padding: 2;
+        overflow-y: auto;
+    }
+
+    .event-deck-modal-buttons {
+        height: 3;
+        margin-top: 1;
+        align: center middle;
+    }
+    """
+
+    def __init__(self, current_value: str = "", **kwargs):
+        super().__init__(**kwargs)
+        self.current_value = current_value
+
+    def compose(self) -> ComposeResult:
+        with Container(classes="event-deck-modal-container"):
+            yield Static("What deck are you running?", classes="modal-title")
+            yield Input(
+                value=self.current_value,
+                placeholder="e.g. Mono Red Aggro (blank = Unknown)",
+                id="event-deck-input",
+            )
+            with Horizontal(classes="event-deck-modal-buttons"):
+                yield Button("Save", id="save", variant="success")
+                yield Button("Cancel", id="cancel", variant="error")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "save":
+            value = self.query_one("#event-deck-input", Input).value.strip()
+            self.dismiss(value)
+        else:
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        """Cancel and close modal without changing anything."""
+        self.dismiss(None)
+
+class EventGameNotesModal(ModalScreen):
+    """Modal for opponent deck + play/draw on an event game.
+
+    Used either proactively (N key, before/after any game) or as a
+    fallback prompt when W/L is pressed with nothing entered yet for
+    that game - in the fallback case there's no Cancel button, since the
+    win/loss itself is already decided; Unknown/blank is always a valid,
+    one-keypress-away answer for both fields.
+    """
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    CSS = """
+    EventGameNotesModal {
+        align: center middle;
+    }
+
+    .event-notes-modal-container {
+        width: 60;
+        height: 24;
+        border: solid $primary;
+        background: $surface;
+        padding: 2;
+        overflow-y: auto;
+    }
+
+    .event-notes-row {
+        height: 3;
+        margin-bottom: 1;
+    }
+
+    .event-notes-label {
+        width: 16;
+        content-align: right middle;
+        padding-right: 1;
+    }
+
+    .event-notes-modal-buttons {
+        height: 3;
+        margin-top: 1;
+        align: center middle;
+    }
+    """
+
+    def __init__(self, existing: Optional[dict] = None, forced: bool = False, **kwargs):
+        super().__init__(**kwargs)
+        self.existing = existing or {}
+        self.forced = forced
+
+    def compose(self) -> ComposeResult:
+        with Container(classes="event-notes-modal-container"):
+            yield Static(
+                "Game Info (Unknown is fine)" if self.forced else "Set Opponent Deck / Play-Draw",
+                classes="modal-title",
+            )
+            with Horizontal(classes="event-notes-row"):
+                yield Static("Opponent Deck:", classes="event-notes-label")
+                yield Input(
+                    value=self.existing.get("opponent_deck") or "",
+                    placeholder="e.g. Mono Red (blank = Unknown)",
+                    id="event-opp-deck-input",
+                )
+            with Horizontal(classes="event-notes-row"):
+                yield Static("Play/Draw:", classes="event-notes-label")
+                yield Select(
+                    [("Unknown", "Unknown"), ("Play", "Play"), ("Draw", "Draw")],
+                    value=self.existing.get("play_draw") or "Unknown",
+                    id="event-play-draw-select",
+                )
+            with Horizontal(classes="event-notes-modal-buttons"):
+                yield Button("Save", id="save", variant="success")
+                if not self.forced:
+                    yield Button("Cancel", id="cancel", variant="error")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "save":
+            self._save()
+        else:
+            self.dismiss(None)
+
+    def _save(self) -> None:
+        opp_deck = self.query_one("#event-opp-deck-input", Input).value.strip()
+        play_draw = self.query_one("#event-play-draw-select", Select).value
+        self.dismiss(
+            {
+                "opponent_deck": opp_deck or None,
+                "play_draw": play_draw if play_draw != "Unknown" else None,
+            }
+        )
+
+    def action_cancel(self) -> None:
+        """Escape saves whatever's filled in when forced (the win/loss is
+        already decided - only the deck/play-draw info is optional), or
+        cancels without changing anything when opened proactively via N."""
+        if self.forced:
+            self._save()
+        else:
+            self.dismiss(None)
+
 class AboutModal(ModalScreen):
     """Modal dialog showing project information, licensing, and credits."""
     
@@ -2393,14 +2556,16 @@ class ManualTUIApp(App):
         Binding("?", "help", "Help"),
         Binding("i", "about", "About"),
         Binding("u", "start_event_run", "Start Run (Event Mode)"),
+        Binding("d", "set_event_deck", "Set Deck (Event Mode)"),
         Binding("ctrl+r", "wipe_event_alltime", "Wipe All-Time (Event Mode)"),
     ]
-    
+
     def __init__(self, state_manager: StateManager):
         super().__init__()
         self.state_manager = state_manager
         self.app_data = state_manager.load_state()
         self.event_catalog = load_event_catalog(default_catalog_path())
+        self._pending_event_game_notes: Optional[dict] = None
 
     def compose(self) -> ComposeResult:
         with Container():
@@ -2606,7 +2771,12 @@ class ManualTUIApp(App):
         self.push_screen(modal, handle_result)
     
     def action_add_game_notes(self) -> None:
-        """Add detailed game notes with optional result application."""
+        """Add detailed game notes (ranked), or set opponent deck / play-draw
+        for the upcoming event game (Event Mode)."""
+        if self.app_data.view_mode == "event":
+            self._event_add_game_notes()
+            return
+
         modal = GameNotesModal()
         
         def handle_result(result):
@@ -2640,7 +2810,12 @@ class ManualTUIApp(App):
         self.push_screen(modal, handle_result)
     
     def action_view_all_notes(self) -> None:
-        """View and edit all game notes."""
+        """View and edit all game notes (ranked), or view event game history
+        (Event Mode)."""
+        if self.app_data.view_mode == "event":
+            self._event_view_games()
+            return
+
         # Initialize game_notes if it doesn't exist
         if not hasattr(self.app_data.stats, 'game_notes'):
             self.app_data.stats.game_notes = []
@@ -2835,8 +3010,39 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
             run_id=run_id, event_id=event.event_id, entry_currency=self._default_entry_currency(event)
         )
         stats.start_run(run)
+        self._pending_event_game_notes = None
         self.refresh_panels()
         self.notify("New run started!", severity="success")
+
+        # Prompt for the deck being run - Unknown (blank/Cancel) is fine too.
+        deck_modal = SetEventDeckModal("")
+
+        def handle_deck_result(value):
+            if value is not None:
+                run.player_deck = value.strip() or None
+                self.refresh_panels()
+
+        self.push_screen(deck_modal, handle_deck_result)
+
+    def action_set_event_deck(self) -> None:
+        """Set/edit the deck for the current event run (Event Mode only)."""
+        if self.app_data.view_mode != "event":
+            self.notify("Press F and choose Event to switch to Event Mode first", severity="warning")
+            return
+
+        stats = self.app_data.event_stats
+        if not stats.current_run:
+            self.notify("Start a run first (press U)", severity="warning")
+            return
+
+        modal = SetEventDeckModal(stats.current_run.player_deck or "")
+
+        def handle_result(value):
+            if value is not None:
+                stats.current_run.player_deck = value.strip() or None
+                self.refresh_panels()
+
+        self.push_screen(modal, handle_result)
 
     def _default_entry_currency(self, event: EventDefinition) -> Optional[str]:
         """Pick a default entry currency for a new run: prefer Gems, else
@@ -2857,7 +3063,13 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
         return _get_event_for_stats(self.app_data.event_stats, self.event_catalog)
 
     def _event_record_result(self, result: EventGameResult) -> None:
-        """Record a win/loss against the current event run."""
+        """Record a win/loss against the current event run.
+
+        If opponent deck / play-draw were already set via N since the last
+        game, use them. Otherwise prompt for them now (Unknown/blank is a
+        one-keypress-away valid answer) since the win/loss itself is
+        already decided and shouldn't wait on that prompt to be recorded.
+        """
         event = self._get_current_event_definition()
         if not event:
             self.notify("No events configured in events.json", severity="error")
@@ -2868,8 +3080,76 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
             self.notify("No active run! Press [U] to start one.", severity="warning")
             return
 
-        stats.record_game(EventGame(result=result), event)
+        if self._pending_event_game_notes is not None:
+            notes = self._pending_event_game_notes
+            self._pending_event_game_notes = None
+            self._finish_event_game(result, event, notes)
+        else:
+            modal = EventGameNotesModal({}, forced=True)
+
+            def handle_result(notes):
+                self._finish_event_game(result, event, notes or {})
+
+            self.push_screen(modal, handle_result)
+
+    def _finish_event_game(self, result: EventGameResult, event: EventDefinition, notes: dict) -> None:
+        """Actually record the game once opponent deck / play-draw are known."""
+        stats = self.app_data.event_stats
+        game = EventGame(
+            result=result,
+            opponent_deck=notes.get("opponent_deck"),
+            play_draw=notes.get("play_draw"),
+        )
+        stats.record_game(game, event)
         self.refresh_panels()
+
+    def _event_add_game_notes(self) -> None:
+        """Set opponent deck / play-draw for the upcoming game (Event Mode,
+        N key). Stashed until the next W/L, which will use it instead of
+        prompting again."""
+        stats = self.app_data.event_stats
+        if not stats.current_run or stats.current_run.status == EventRunStatus.ENDED:
+            self.notify("No active run! Press [U] to start one.", severity="warning")
+            return
+
+        modal = EventGameNotesModal(self._pending_event_game_notes)
+
+        def handle_result(result):
+            if result is not None:
+                self._pending_event_game_notes = result
+                self.notify("Saved - will apply to the next game recorded", severity="success")
+
+        self.push_screen(modal, handle_result)
+
+    def _event_view_games(self) -> None:
+        """Show a read-only history of games played this run and in recent
+        completed runs (Event Mode, Ctrl+N)."""
+        stats = self.app_data.event_stats
+        lines = ["Event Game History", ""]
+
+        def format_game(i, game: EventGame) -> str:
+            play_draw = game.play_draw or "Unknown"
+            opp = game.opponent_deck or "Unknown"
+            return f"  {i}. {game.result.value:<4} {play_draw:<7} vs {opp}"
+
+        if stats.current_run and stats.current_run.games:
+            lines.append(f"Current Run ({stats.current_run.wins}W-{stats.current_run.losses}L):")
+            for i, game in enumerate(stats.current_run.games, 1):
+                lines.append(format_game(i, game))
+            lines.append("")
+
+        for run in reversed(stats.recent_runs):
+            if stats.current_run is not None and run.run_id == stats.current_run.run_id:
+                continue
+            lines.append(f"Run {run.run_id} ({run.wins}W-{run.losses}L):")
+            for i, game in enumerate(run.games, 1):
+                lines.append(format_game(i, game))
+            lines.append("")
+
+        if len(lines) == 2:
+            lines.append("No games recorded yet.")
+
+        self.push_screen(ConfirmationModal("\n".join(lines).rstrip()))
 
     def _event_restart_session(self) -> None:
         """Reset event session totals (keeps all-time totals), with confirmation."""
@@ -3071,7 +3351,9 @@ Ctrl+Q - Quit           I - About/Info
 
 Event Mode:
 F - Switch mode (choose Event)   U - Start new run
-W/L - Win/loss (current run)  R - Restart event session
+W/L - Win/loss (current run)  D - Set deck being run
+N - Set opponent deck/play-draw (applies to the next game)
+Ctrl+N - View game history       R - Restart event session
 Ctrl+R - Wipe all-time event totals (cannot be undone)
 
 Manual Editing:

@@ -47,14 +47,27 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   same single `tracker_state.json` blob as everything else, following
   this app's "one big JSON file" convention rather than the parent
   project's per-file managers.
-- UI: **F** opens `SwitchModeModal`, a button-based dialog for picking
-  Constructed BO1, Constructed BO3, Limited, or Event (pressing **F** or
-  **Esc** while it's open dismisses it without changing anything);
-  choosing Event swaps the two main panels for `EventRunPanel` /
-  `EventStatsPanel` (gold `[██]` win pips, red `[▓▓]` loss pips). **W**/
-  **L** are context-sensitive — they drive the ranked rank or the event
-  run depending on which view is active. **U** starts a new run, **R**
-  restarts the event session (confirmation modal, same as ranked).
+- UI: **F** opens `SwitchModeModal`, a 2x2 button grid for picking
+  Constructed BO1/BO3, Limited, or Event (pressing **F** or **Esc** while
+  it's open dismisses it without changing anything); choosing Event swaps
+  the two main panels for `EventRunPanel` / `EventStatsPanel` (gold `[██]`
+  win pips, red `[▓▓]` loss pips). **W**/**L** are context-sensitive — they
+  drive the ranked rank or the event run depending on which view is
+  active. **U** starts a new run (immediately prompting for the deck being
+  run — blank/Cancel is a valid "Unknown"), **R** restarts the event
+  session (confirmation modal, same as ranked).
+- Per-game tracking: **D** edits the current run's deck at any time. **N**
+  opens `EventGameNotesModal` to set the *upcoming* game's opponent deck
+  (free text) and play/draw (Play/Draw/Unknown), stashed until the next
+  W/L consumes it. If W/L is pressed with nothing stashed, the same modal
+  reopens in `forced=True` mode (no Cancel button, since the win/loss is
+  already decided) so the game still gets recorded — Unknown/blank is a
+  one-keypress-away valid answer for both fields either way. **Ctrl+N**
+  opens a read-only game-history viewer (current run, then recent
+  completed runs) showing result/play-draw/opponent-deck per game — the
+  only intentionally-uneditable history view in the app, since editing a
+  past game would desync the session/all-time aggregates it's already
+  been folded into.
 - Tests: `test_event_models.py` (pytest), covering prize/milestone
   lookup, run completion, session/all-time aggregation, and a
   StateManager save/load round-trip.

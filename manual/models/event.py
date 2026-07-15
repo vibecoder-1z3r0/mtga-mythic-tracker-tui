@@ -154,6 +154,7 @@ class EventGame:
     result: EventGameResult
     timestamp: datetime = field(default_factory=datetime.now)
     opponent_deck: Optional[str] = None
+    play_draw: Optional[str] = None  # "Play" or "Draw", None if unrecorded
     notes: str = ""
 
 
