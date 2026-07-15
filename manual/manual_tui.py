@@ -1015,9 +1015,9 @@ class EventRunPanel(Static):
             yield self._create_run_section()
             yield Static("─" * 30, classes="separator")
             yield Static(
-                "[U] Start Run  [W] Win  [L] Loss  [D] Set Deck  [N] Opp Deck/Play-Draw  "
-                "[G] Set Win Goal  [Ctrl+N] Game History  [R] Restart Session  "
-                "[Ctrl+R] Wipe All-Time  [F] Switch Mode",
+                "[U] Start Run  [W] Win  [L] Loss  [D] Set Deck  [G] Set Win Goal  "
+                "[N] Opp Deck/Play-Draw  [Ctrl+G] Game History  [Ctrl+R] Run History  "
+                "[R] Restart Session  [Ctrl+W] Wipe All-Time  [F] Switch Mode",
                 classes="help-text",
             )
 
@@ -1046,6 +1046,15 @@ class EventRunPanel(Static):
             option = event.get_entry_option(run.entry_currency)
             amount = option.amount if option else "?"
             lines.append(f"Entry: {amount} {run.entry_currency}")
+
+        goal = self.app_data.event_stats.run_goal_wins
+        if goal is not None:
+            remaining = goal - run.wins
+            if remaining <= 0:
+                lines.append(f"🎯 GOAL: {goal} wins - achieved!")
+            else:
+                lines.append(f"🎯 GOAL: {goal} wins ({remaining} to go)")
+
         lines.append(f"Wins:   {win_bars}")
         lines.append(f"Losses: {loss_bars}")
         lines.append("")
@@ -1094,13 +1103,9 @@ class EventStatsPanel(Static):
 
     def _create_session_section(self) -> Static:
         stats = self.app_data.event_stats
-        lines = ["📊 CURRENT SESSION"]
-        if stats.session_goal_wins is not None:
-            remaining = stats.session_goal_wins - stats.session_wins
-            if remaining <= 0:
-                lines.append(f"🎯 GOAL: {stats.session_goal_wins} wins - achieved!")
-            else:
-                lines.append(f"🎯 GOAL: {stats.session_goal_wins} wins ({remaining} to go)")
+        lines = [
+            "📊 CURRENT SESSION",
+        ]
         lines.extend(
             [
                 f"Runs played: {stats.session_runs_played}",
@@ -2087,7 +2092,7 @@ class GameNotesModal(ModalScreen):
         self.dismiss(None)
 
 class SetEventGoalModal(ModalScreen):
-    """Modal for setting a session win-count goal in Event Mode (G key)."""
+    """Modal for setting a per-run win-count goal in Event Mode (G key)."""
 
     BINDINGS = [
         Binding("escape", "cancel", "Cancel"),
@@ -2119,10 +2124,10 @@ class SetEventGoalModal(ModalScreen):
 
     def compose(self) -> ComposeResult:
         with Container(classes="event-goal-modal-container"):
-            yield Static("Set a session win goal", classes="modal-title")
+            yield Static("Set a run win goal", classes="modal-title")
             yield Input(
                 value=str(self.current_goal) if self.current_goal is not None else "",
-                placeholder="e.g. 20 (total wins this session)",
+                placeholder="e.g. 5 (wins this run)",
                 id="event-goal-input",
                 type="integer",
             )
@@ -2381,16 +2386,24 @@ class EventGamesViewerModal(ModalScreen):
     }
     """
 
-    def __init__(self, event_stats: EventStats, event: Optional[EventDefinition], **kwargs):
+    def __init__(
+        self,
+        event_stats: EventStats,
+        event: Optional[EventDefinition],
+        runs: Optional[List[EventRun]] = None,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.event_stats = event_stats
         self.event = event
+        self.scoped_runs = runs
         self.has_changes = False
         self._rows: List[Tuple[EventRun, EventGame]] = []
 
     def compose(self) -> ComposeResult:
         with Container(id="event-games-dialog"):
-            yield Label("Event Game History", classes="modal-title")
+            title = "Event Game History" if self.scoped_runs is None else f"Games in Run {self.scoped_runs[0].run_id}"
+            yield Label(title, classes="modal-title")
             yield Label(
                 "Use ↑↓ to select, then click Edit (result/deck/play-draw/notes)",
                 classes="help-text",
@@ -2407,6 +2420,8 @@ class EventGamesViewerModal(ModalScreen):
         self._populate()
 
     def _runs_newest_first(self):
+        if self.scoped_runs is not None:
+            return self.scoped_runs
         runs = []
         if self.event_stats.current_run:
             runs.append(self.event_stats.current_run)
@@ -2506,6 +2521,112 @@ class EventGamesViewerModal(ModalScreen):
         for name in new_milestones - old_milestones:
             stats.session_milestone_counts[name] = stats.session_milestone_counts.get(name, 0) + 1
             stats.alltime_milestone_counts[name] = stats.alltime_milestone_counts.get(name, 0) + 1
+
+    def action_cancel(self) -> None:
+        self.dismiss("updated" if self.has_changes else None)
+
+class EventRunsViewerModal(ModalScreen):
+    """Two-level run history (Event Mode, Ctrl+R): lists runs (deck,
+    record, prize, status); selecting one and clicking "View Games" drills
+    into that run's games via EventGamesViewerModal, scoped to just it."""
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+        Binding("enter", "view_games", "View Games"),
+    ]
+
+    CSS = """
+    EventRunsViewerModal {
+        align: center middle;
+    }
+
+    #event-runs-dialog {
+        width: 95;
+        height: 30;
+        border: thick $primary;
+        background: $surface;
+        padding: 1;
+    }
+
+    .event-runs-list {
+        height: 1fr;
+        border: solid $secondary;
+        margin: 1 0;
+    }
+
+    .event-runs-buttons {
+        height: 3;
+        content-align: center middle;
+    }
+    """
+
+    def __init__(self, event_stats: EventStats, event: Optional[EventDefinition], **kwargs):
+        super().__init__(**kwargs)
+        self.event_stats = event_stats
+        self.event = event
+        self.has_changes = False
+        self._runs: List[EventRun] = []
+
+    def compose(self) -> ComposeResult:
+        with Container(id="event-runs-dialog"):
+            yield Label("Event Run History", classes="modal-title")
+            yield Label("Use ↑↓ to select, then click View Games", classes="help-text")
+            table = DataTable(id="event-runs-table", classes="event-runs-list")
+            table.add_columns("Run", "Deck", "Record", "Prize", "Status")
+            table.cursor_type = "row"
+            yield table
+            with Horizontal(classes="event-runs-buttons"):
+                yield Button("View Games", id="view-games", variant="success")
+                yield Button("Close", id="close", variant="primary")
+
+    def on_mount(self) -> None:
+        self._populate()
+
+    def _runs_newest_first(self) -> List[EventRun]:
+        runs = []
+        if self.event_stats.current_run:
+            runs.append(self.event_stats.current_run)
+        for run in reversed(self.event_stats.recent_runs):
+            if self.event_stats.current_run is not None and run.run_id == self.event_stats.current_run.run_id:
+                continue
+            runs.append(run)
+        return runs
+
+    def _populate(self) -> None:
+        table = self.query_one("#event-runs-table", DataTable)
+        table.clear()
+        self._runs = self._runs_newest_first()
+        for run in self._runs:
+            prize = run.prize(self.event) if self.event else None
+            prize_str = f"{prize.gems} gems, {prize.packs} packs" if prize else "-"
+            table.add_row(
+                run.run_id,
+                run.player_deck or "Unknown",
+                f"{run.wins}-{run.losses}",
+                prize_str,
+                run.status.value,
+            )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "view-games":
+            self.action_view_games()
+        else:
+            self.dismiss("updated" if self.has_changes else None)
+
+    def action_view_games(self) -> None:
+        table = self.query_one("#event-runs-table", DataTable)
+        if table.cursor_row is None or table.cursor_row >= len(self._runs):
+            return
+        run = self._runs[table.cursor_row]
+
+        modal = EventGamesViewerModal(self.event_stats, self.event, runs=[run])
+
+        def handle_result(result):
+            if result == "updated":
+                self.has_changes = True
+                self._populate()
+
+        self.app.push_screen(modal, handle_result)
 
     def action_cancel(self) -> None:
         self.dismiss("updated" if self.has_changes else None)
@@ -2842,7 +2963,9 @@ class ManualTUIApp(App):
         Binding("i", "about", "About"),
         Binding("u", "start_event_run", "Start Run (Event Mode)"),
         Binding("d", "set_event_deck", "Set Deck (Event Mode)"),
-        Binding("ctrl+r", "wipe_event_alltime", "Wipe All-Time (Event Mode)"),
+        Binding("ctrl+g", "view_event_games", "Game History (Event Mode)"),
+        Binding("ctrl+r", "view_event_runs", "Run History (Event Mode)"),
+        Binding("ctrl+w", "wipe_event_alltime", "Wipe All-Time (Event Mode)"),
     ]
 
     # Ranked-only actions with no Event Mode behavior at all - hidden from
@@ -2855,6 +2978,7 @@ class ManualTUIApp(App):
         "collapse_tiers",
         "hide_tiers",
         "set_rank",
+        "view_all_notes",
     }
 
     def __init__(self, state_manager: StateManager):
@@ -3036,7 +3160,7 @@ class ManualTUIApp(App):
         self.push_screen(modal, handle_result)
     
     def action_set_goal(self) -> None:
-        """Set session goal rank (ranked), or session win goal (Event Mode)."""
+        """Set session goal rank (ranked), or per-run win goal (Event Mode)."""
         if self.app_data.view_mode == "event":
             self._event_set_goal()
             return
@@ -3117,12 +3241,8 @@ class ManualTUIApp(App):
         self.push_screen(modal, handle_result)
     
     def action_view_all_notes(self) -> None:
-        """View and edit all game notes (ranked), or view event game history
-        (Event Mode)."""
-        if self.app_data.view_mode == "event":
-            self._event_view_games()
-            return
-
+        """View and edit all game notes (ranked only - Event Mode has its
+        own dedicated Ctrl+G/Ctrl+R history views)."""
         # Initialize game_notes if it doesn't exist
         if not hasattr(self.app_data.stats, 'game_notes'):
             self.app_data.stats.game_notes = []
@@ -3352,21 +3472,22 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
         self.push_screen(modal, handle_result)
 
     def _event_set_goal(self) -> None:
-        """Set/clear a session win-count goal (Event Mode, G key). Persists
-        across restart_session() like ranked's rank goal does - only
-        progress toward it resets, not the goal itself."""
+        """Set/clear a per-run win-count goal (Event Mode, G key), shown in
+        the run panel. The target persists across new runs (mirrors
+        ranked's rank goal, which isn't cleared by a session reset either)
+        - each new run's wins naturally starts back at 0."""
         stats = self.app_data.event_stats
-        modal = SetEventGoalModal(stats.session_goal_wins)
+        modal = SetEventGoalModal(stats.run_goal_wins)
 
         def handle_result(result):
             if result == "clear":
-                stats.session_goal_wins = None
+                stats.run_goal_wins = None
                 self.refresh_panels()
-                self.notify("Session win goal cleared", severity="information")
+                self.notify("Run win goal cleared", severity="information")
             elif result is not None:
-                stats.session_goal_wins = result
+                stats.run_goal_wins = result
                 self.refresh_panels()
-                self.notify(f"Session win goal set: {result} wins", severity="success")
+                self.notify(f"Run win goal set: {result} wins", severity="success")
 
         self.push_screen(modal, handle_result)
 
@@ -3421,8 +3542,9 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
     def _finish_event_game(self, result: EventGameResult, event: EventDefinition, notes: dict) -> None:
         """Actually record the game once opponent deck / play-draw are known."""
         stats = self.app_data.event_stats
-        goal = stats.session_goal_wins
-        was_goal_achieved = goal is not None and stats.session_wins >= goal
+        goal = stats.run_goal_wins
+        run = stats.current_run
+        was_goal_achieved = goal is not None and run is not None and run.wins >= goal
 
         game = EventGame(
             result=result,
@@ -3432,8 +3554,8 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
         )
         stats.record_game(game, event)
 
-        if goal is not None and not was_goal_achieved and stats.session_wins >= goal:
-            self.notify(f"🎉 SESSION GOAL ACHIEVED: {goal} wins! 🎉", severity="success")
+        if goal is not None and run is not None and not was_goal_achieved and run.wins >= goal:
+            self.notify(f"🎉 RUN GOAL ACHIEVED: {goal} wins! 🎉", severity="success")
 
         self.refresh_panels()
 
@@ -3455,13 +3577,35 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
 
         self.push_screen(modal, handle_result)
 
-    def _event_view_games(self) -> None:
-        """Show and edit game history (this run + recent completed runs),
-        Event Mode Ctrl+N, including result - the modal itself keeps the
-        session/all-time totals in sync when a completed run's result
+    def action_view_event_games(self) -> None:
+        """Show and edit the flat game history (this run + recent completed
+        runs), Event Mode Ctrl+G, including result - the modal itself keeps
+        the session/all-time totals in sync when a completed run's result
         changes."""
+        if self.app_data.view_mode != "event":
+            self.notify("Press F and choose Event to switch to Event Mode first", severity="warning")
+            return
+
         event = self._get_current_event_definition()
         modal = EventGamesViewerModal(self.app_data.event_stats, event)
+
+        def handle_result(result):
+            if result == "updated":
+                self.state_manager.save_state(self.app_data)
+                self.refresh_panels()
+                self.notify("Game updated", severity="success")
+
+        self.push_screen(modal, handle_result)
+
+    def action_view_event_runs(self) -> None:
+        """Browse runs (Event Mode, Ctrl+R); pick one to drill into its
+        games via the same EventGamesViewerModal, scoped to just that run."""
+        if self.app_data.view_mode != "event":
+            self.notify("Press F and choose Event to switch to Event Mode first", severity="warning")
+            return
+
+        event = self._get_current_event_definition()
+        modal = EventRunsViewerModal(self.app_data.event_stats, event)
 
         def handle_result(result):
             if result == "updated":
@@ -3672,11 +3816,12 @@ Ctrl+Q - Quit           I - About/Info
 Event Mode:
 F - Switch mode (choose Event)   U - Start new run
 W/L - Win/loss (current run)  D - Set deck being run
-G - Set/clear a session win goal (celebrates when reached)
+G - Set/clear a run win goal (celebrates when reached)
 N - Set opponent deck/play-draw/notes (applies to the next game)
-Ctrl+N - View/edit game history (deck, play-draw, notes, result)
+Ctrl+G - View/edit game history (deck, play-draw, notes, result)
+Ctrl+R - Browse run history, drill into a run's games
 R - Restart event session
-Ctrl+R - Wipe all-time event totals (cannot be undone)
+Ctrl+W - Wipe all-time event totals (cannot be undone)
 
 M/T/E/C/H/S are ranked-only and not available in Event Mode.
 

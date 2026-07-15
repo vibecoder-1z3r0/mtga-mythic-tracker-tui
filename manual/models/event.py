@@ -245,11 +245,12 @@ class EventStats:
     event_id: Optional[str] = None
     current_run: Optional[EventRun] = None
 
-    # A user-set target for session_wins, e.g. "reach 20 wins this
-    # session." Persists across restart_session() (mirrors ranked's
-    # session_goal_tier, which also isn't cleared on a session reset) -
-    # only the *progress* toward it resets, not the goal itself.
-    session_goal_wins: Optional[int] = None
+    # A user-set target for the CURRENT run's wins, e.g. "reach 5 wins
+    # this run." The target itself persists across new runs (mirrors
+    # ranked's session_goal_tier, which isn't cleared by a session
+    # reset either) - each new run's wins naturally starts back at 0
+    # since EventRun.wins is computed live from that run's own games.
+    run_goal_wins: Optional[int] = None
 
     session_runs_played: int = 0
     session_wins: int = 0
@@ -339,4 +340,4 @@ class EventStats:
         self.alltime_packs = 0
         self.alltime_milestone_counts = {}
         self.recent_runs = []
-        self.session_goal_wins = None
+        self.run_goal_wins = None
