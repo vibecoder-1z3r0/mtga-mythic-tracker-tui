@@ -307,6 +307,32 @@ def test_state_manager_survives_renamed_field_in_saved_file():
         assert loaded.event_stats.event_id == "historic_pauper_challenge"
 
 
+def test_state_manager_deserializes_datetimes_nested_in_lists():
+    """Regression test: EventGame.timestamp and EventRun.start_time/
+    end_time live inside lists (current_run.games, recent_runs), and the
+    datetime-deserialization walk only recursed into dicts, not lists -
+    so these came back as plain ISO strings instead of datetime objects
+    after every reload."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        event = load_test_event()
+
+        sm = StateManager(data_dir=Path(temp_dir), save_enabled=True)
+        app_data = sm.load_state()
+
+        run = EventRun(run_id="r1", event_id=event.event_id, entry_currency="Gems")
+        app_data.event_stats.start_run(run)
+        app_data.event_stats.record_game(EventGame(result=EventGameResult.WIN), event)
+        sm.save_state(app_data)
+
+        sm2 = StateManager(data_dir=Path(temp_dir), save_enabled=True)
+        loaded = sm2.load_state()
+
+        from datetime import datetime as dt
+
+        assert isinstance(loaded.event_stats.current_run.start_time, dt)
+        assert isinstance(loaded.event_stats.current_run.games[0].timestamp, dt)
+
+
 def main():
     """Run all event model tests."""
     test_load_event_catalog()
@@ -324,6 +350,7 @@ def main():
     test_event_stats_rejects_game_with_no_active_run()
     test_state_manager_persists_event_stats()
     test_state_manager_survives_renamed_field_in_saved_file()
+    test_state_manager_deserializes_datetimes_nested_in_lists()
     print("All manual-TUI event model tests passed!")
 
 

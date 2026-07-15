@@ -236,6 +236,13 @@ class StateManager:
                 for k, v in obj.items():
                     obj[k] = convert_iso_string(v, k)
                 return obj
+            elif isinstance(obj, list):
+                # Recurse into list items (e.g. current_run.games,
+                # recent_runs) - without this, a game/run's own
+                # timestamp/start_time/end_time never gets deserialized
+                # back to a datetime, since it's nested inside a list
+                # rather than directly inside a dict.
+                return [convert_iso_string(item, parent_key) for item in obj]
             elif isinstance(obj, str) and parent_key in datetime_fields:
                 try:
                     return datetime.fromisoformat(obj)
