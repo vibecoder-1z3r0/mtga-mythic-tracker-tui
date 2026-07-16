@@ -215,17 +215,27 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   and All-Time (removed earlier this session to fix Trends clipping) and
   removes one from Trends, a net +1 row - full Trends (including the
   Play/Draw glyph line) now needs an ~26-row terminal instead of 24.
-- The top bar's `.top-format` column (event entry cost) truncated instead
-  of wrapping when an event has multiple entry options and no run is
-  active yet - e.g. "💰 Entry: 5000 Gold / 1000 Gems" got chopped off
-  mid-text in a real terminal, since `.top-panel` was fixed at `height: 3`
-  (one content row after the border). Bumped to `height: 4` (two content
-  rows) so Rich/Textual's normal text wrapping shows the full line instead
-  of clipping it; the other three top-bar columns just get a bit of extra
-  vertical centering room, which is harmless. Verified at the actual
-  reported terminal size (121x30) via a headless pilot - full entry-cost
-  text now visible, and the stats panel (Session/All-Time/Trends) still
-  fits without scrolling despite the 1-row overhead this adds.
+- The top bar's `.top-format` column (event entry cost) truncated when an
+  event has multiple entry options and no run is active yet - e.g.
+  "💰 Entry: 5000 Gold / 1000 Gems" got chopped off mid-text, since the
+  column was only `width: 20%` of the top bar. First fix attempt bumped
+  `.top-panel` from `height: 3` to `4` so the text could wrap onto a
+  second line - this technically avoided truncation but visibly made the
+  whole top bar look "too tall," since the other three columns (which
+  only ever need one line) now had a full blank row of vertical padding
+  under `content-align: middle`. Reverted the height back to `3` and
+  instead reallocated the four columns' widths based on each one's actual
+  worst-case content length across both ranked and event mode -
+  `.top-season` 38% (was 40%, still enough for the longest ranked
+  countdown string), `.top-format` 28% (was 20% - the actual fix, gives
+  enough room for a 2-option entry-cost line), `.top-bars` 16% (was 20%,
+  never needs more than ~17 chars), `.top-rank` 18% (was 20%, comfortably
+  fits the longest rank string, e.g. "📍 Platinum 2 (3/6)"). Verified via
+  a headless pilot at the actual reported terminal size (121x30), reading
+  each column's real Static content against its rendered size, for both
+  ranked mode's longest strings (season countdown, "Platinum 2 (3/6)")
+  and event mode's longest strings (event name, 2-option entry cost) -
+  all fit on one line with margin to spare, single-row top bar restored.
 - Six ranked-only actions (`toggle_mythic`, `set_season_start`,
   `edit_stats`, `hide_tiers`, `set_rank`, and `view_all_notes` — bound to
   M/T/E/H/S and Ctrl+N respectively) have no Event Mode behavior at all,

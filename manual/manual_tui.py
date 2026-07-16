@@ -2898,36 +2898,36 @@ class ManualTUIApp(App):
     
     .top-panel {
         dock: top;
-        height: 4;
+        height: 3;
         border: solid $primary;
         padding: 0 1;
     }
-    
+
     .top-panel-layout {
         height: 100%;
     }
-    
+
     .top-season {
-        width: 40%;
+        width: 38%;
         height: 100%;
         padding: 0 1;
         content-align: left middle;
     }
-    
+
     .top-format {
-        width: 20%;
+        width: 28%;
         height: 100%;
         content-align: center middle;
     }
-    
+
     .top-bars {
-        width: 20%;
+        width: 16%;
         height: 100%;
         content-align: center middle;
     }
-    
+
     .top-rank {
-        width: 20%;
+        width: 18%;
         height: 100%;
         content-align: right middle;
         padding: 0 1;
