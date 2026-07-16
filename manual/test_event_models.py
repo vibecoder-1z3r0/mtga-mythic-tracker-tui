@@ -152,9 +152,9 @@ def test_event_stats_session_and_alltime_aggregation():
     assert run1.status == EventRunStatus.ENDED
     assert stats.session_runs_played == 1
     assert stats.session_wins == 7
-    assert stats.session_gems == 1500
+    assert stats.session_prize(event).gems == 1500
     assert stats.alltime_wins == 7
-    assert stats.session_milestone_counts["Trophy"] == 1
+    assert stats.session_milestone_counts(event)["Trophy"] == 1
 
     run2 = EventRun(run_id="r2", event_id=event.event_id, entry_currency="Gems")
     stats.start_run(run2)
@@ -231,14 +231,23 @@ def test_event_stats_restart_session_discards_active_run():
 def test_event_stats_run_goal_wins_persists_across_restart():
     """Test that a run win goal survives restart_session() (mirrors
     ranked's session_goal_tier, which also isn't cleared on reset) - only
-    wipe_alltime() should clear it."""
+    wipe_alltime() should clear it. Also confirms restart_session() zeroes
+    session_wins (via the session_start_run_count marker) while leaving
+    alltime_wins (computed from the full recent_runs) untouched."""
+    event = load_test_event()
     stats = EventStats()
     stats.run_goal_wins = 5
-    stats.session_wins = 5
+
+    run = EventRun(run_id="r1", event_id=event.event_id, entry_currency="Gems")
+    stats.start_run(run)
+    for _ in range(7):
+        stats.record_game(EventGame(result=EventGameResult.WIN), event)
+    assert stats.session_wins == 7
 
     stats.restart_session()
     assert stats.run_goal_wins == 5
     assert stats.session_wins == 0
+    assert stats.alltime_wins == 7  # unchanged
 
     stats.wipe_alltime()
     assert stats.run_goal_wins is None
@@ -475,6 +484,59 @@ def test_state_manager_recomputes_alltime_from_stale_stored_counters():
         assert reloaded.event_stats.alltime_milestone_counts(event) == {}
 
 
+def test_state_manager_legacy_save_treats_all_history_as_current_session():
+    """Regression test for a real user report: a save file written before
+    session_* became computed from recent_runs (and before
+    session_start_run_count existed at all) has stale session_wins/losses/
+    gems/packs/plays/draws/milestone_counts fields and no
+    session_start_run_count key. On load, the stale fields must be dropped
+    (same as any other unrecognized field) and session_start_run_count must
+    default to 0 - meaning every run in recent_runs counts as "this
+    session," so session_* exactly equals alltime_* whenever this is the
+    only session that's ever been played. That equality is exactly what
+    broke before this fix: session_plays/session_draws were separately
+    stored counters that could only reflect runs completed after they
+    started being tracked, while alltime_plays/alltime_draws are computed
+    from the complete history - so the two diverged even for a user who'd
+    never once called restart_session()."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        event = load_test_event()
+
+        sm = StateManager(data_dir=Path(temp_dir), save_enabled=True)
+        app_data = sm.load_state()
+
+        for i in range(3):
+            run = EventRun(run_id=f"r{i}", event_id=event.event_id, entry_currency="Gems")
+            app_data.event_stats.start_run(run)
+            app_data.event_stats.record_game(
+                EventGame(result=EventGameResult.LOSS, play_draw="Play"), event
+            )
+            app_data.event_stats.record_game(
+                EventGame(result=EventGameResult.LOSS, play_draw="Draw"), event
+            )
+        sm.save_state(app_data)
+
+        state_file = Path(temp_dir) / "tracker_state.json"
+        data = json.loads(state_file.read_text())
+        # Simulate a save from before session_* was computed: stale stored
+        # counters that under-count relative to the real history, and no
+        # session_start_run_count key at all.
+        data["event_stats"]["session_wins"] = 0
+        data["event_stats"]["session_losses"] = 0
+        data["event_stats"]["session_plays"] = 0
+        data["event_stats"]["session_draws"] = 0
+        data["event_stats"].pop("session_start_run_count", None)
+        state_file.write_text(json.dumps(data, indent=2))
+
+        sm2 = StateManager(data_dir=Path(temp_dir), save_enabled=True)
+        reloaded = sm2.load_state()
+
+        assert reloaded.event_stats.session_start_run_count == 0
+        assert reloaded.event_stats.session_plays == reloaded.event_stats.alltime_plays == 3
+        assert reloaded.event_stats.session_draws == reloaded.event_stats.alltime_draws == 3
+        assert reloaded.event_stats.session_losses == reloaded.event_stats.alltime_losses == 6
+
+
 def main():
     """Run all event model tests."""
     test_load_event_catalog()
@@ -497,6 +559,7 @@ def main():
     test_state_manager_deserializes_datetimes_nested_in_lists()
     test_state_manager_export_import_round_trip()
     test_state_manager_recomputes_alltime_from_stale_stored_counters()
+    test_state_manager_legacy_save_treats_all_history_as_current_session()
     print("All manual-TUI event model tests passed!")
 
 

@@ -1183,10 +1183,12 @@ class EventStatsPanel(Static):
         live_wins, live_losses, live_gems, live_packs, live_plays, live_draws, has_active_run = (
             self._live_run_contribution()
         )
+        event = _get_event_for_stats(stats, self.event_catalog)
+        prize = stats.session_prize(event) if event else PrizeTotal()
         wins = stats.session_wins + live_wins
         losses = stats.session_losses + live_losses
-        gems = stats.session_gems + live_gems
-        packs = stats.session_packs + live_packs
+        gems = prize.gems + live_gems
+        packs = prize.packs + live_packs
 
         runs_played = str(stats.session_runs_played)
         if has_active_run:
@@ -1202,8 +1204,9 @@ class EventStatsPanel(Static):
             f"Prize: {gems} gems, {packs} packs",
             _on_the_play_line(plays, draws),
         ]
-        if stats.session_milestone_counts:
-            counts_str = ", ".join(f"{k}: {v}" for k, v in stats.session_milestone_counts.items())
+        milestone_counts = stats.session_milestone_counts(event) if event else {}
+        if milestone_counts:
+            counts_str = ", ".join(f"{k}: {v}" for k, v in milestone_counts.items())
             lines.append(f"Milestones: {counts_str}")
         return Static("\n".join(lines), classes="event-stat-section")
 
@@ -2895,7 +2898,7 @@ class ManualTUIApp(App):
     
     .top-panel {
         dock: top;
-        height: 3;
+        height: 4;
         border: solid $primary;
         padding: 0 1;
     }

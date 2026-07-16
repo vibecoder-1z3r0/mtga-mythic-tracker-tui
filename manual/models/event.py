@@ -260,21 +260,60 @@ class EventStats:
     # since EventRun.wins is computed live from that run's own games.
     run_goal_wins: Optional[int] = None
 
-    session_runs_played: int = 0
-    session_wins: int = 0
-    session_losses: int = 0
-    session_gems: int = 0
-    session_packs: int = 0
-    session_plays: int = 0
-    session_draws: int = 0
-    session_milestone_counts: Dict[str, int] = field(default_factory=dict)
-
-    # Every completed run ever played, in completion order. All-time totals
-    # are computed from this rather than stored as separate counters, so
-    # there's only one source of truth and nothing to keep in sync. Not
-    # session-scoped (spans past sessions too), which is why session_*
-    # above still needs its own counters.
+    # Every completed run ever played, in completion order. Both session
+    # and all-time totals are computed from this rather than stored as
+    # separate counters, so there's only one source of truth and nothing
+    # to keep in sync (a stored counter added after some runs were already
+    # played would otherwise miss them forever, which is exactly the bug
+    # that motivated this - session_plays/session_draws were once stored
+    # counters, and diverged from the computed alltime_plays/alltime_draws
+    # even for a user on their very first, never-restarted session).
     recent_runs: List[EventRun] = field(default_factory=list)
+
+    # Index into recent_runs marking where the current session began - runs
+    # from this index onward belong to "this session". Starts at 0, so if
+    # this is the only session ever played, session_* and alltime_* below
+    # are identical by construction.
+    session_start_run_count: int = 0
+
+    def _session_runs(self) -> List[EventRun]:
+        return self.recent_runs[self.session_start_run_count :]
+
+    @property
+    def session_runs_played(self) -> int:
+        return len(self._session_runs())
+
+    @property
+    def session_wins(self) -> int:
+        return sum(r.wins for r in self._session_runs())
+
+    @property
+    def session_losses(self) -> int:
+        return sum(r.losses for r in self._session_runs())
+
+    @property
+    def session_plays(self) -> int:
+        return sum(r.plays for r in self._session_runs())
+
+    @property
+    def session_draws(self) -> int:
+        return sum(r.draws for r in self._session_runs())
+
+    def session_prize(self, event: EventDefinition) -> PrizeTotal:
+        """Total prize earned across runs completed this session."""
+        total = PrizeTotal()
+        for run in self._session_runs():
+            prize = run.prize(event)
+            total = total + PrizeTotal(gems=prize.gems, packs=prize.packs)
+        return total
+
+    def session_milestone_counts(self, event: EventDefinition) -> Dict[str, int]:
+        """Cumulative milestone tally across runs completed this session."""
+        counts: Dict[str, int] = {}
+        for run in self._session_runs():
+            for milestone in event.milestones_met(run.wins):
+                counts[milestone.name] = counts.get(milestone.name, 0) + 1
+        return counts
 
     @property
     def alltime_runs_played(self) -> int:
@@ -339,52 +378,26 @@ class EventStats:
         return True
 
     def _complete_run(self, run: EventRun, event: EventDefinition) -> None:
-        """Fold a just-completed run's results into session totals and the
-        completed-run history (all-time totals are computed from that
-        history, not tracked here)."""
-        prize = run.prize(event)
-
-        self.session_runs_played += 1
-        self.session_wins += run.wins
-        self.session_losses += run.losses
-        self.session_gems += prize.gems
-        self.session_packs += prize.packs
-        self.session_plays += run.plays
-        self.session_draws += run.draws
-
-        for milestone in event.milestones_met(run.wins):
-            self.session_milestone_counts[milestone.name] = (
-                self.session_milestone_counts.get(milestone.name, 0) + 1
-            )
-
+        """Fold a just-completed run into the completed-run history. Both
+        session and all-time totals are computed from recent_runs, not
+        tracked here."""
         self.recent_runs.append(run)
 
     def restart_session(self) -> None:
-        """Reset session-scoped counters but keep all-time totals (mirrors
-        SessionStats.reset_session). Also discards any in-progress run, since
-        a restarted session shouldn't keep showing a stale run's wins/losses."""
+        """Start a new session boundary: session_* stats (computed from
+        recent_runs[session_start_run_count:]) read as zero going forward,
+        since nothing's been completed since this new marker, while
+        all-time totals (computed from the full recent_runs) are
+        unaffected. Also discards any in-progress run, since a restarted
+        session shouldn't keep showing a stale run's wins/losses."""
         self.current_run = None
-        self.session_runs_played = 0
-        self.session_wins = 0
-        self.session_losses = 0
-        self.session_gems = 0
-        self.session_packs = 0
-        self.session_plays = 0
-        self.session_draws = 0
-        self.session_milestone_counts = {}
+        self.session_start_run_count = len(self.recent_runs)
 
     def wipe_alltime(self) -> None:
         """Wipe all-time totals permanently. Also discards any in-progress
         run and resets session totals, since an all-time wipe with a
         leftover run or session total wouldn't make sense."""
         self.current_run = None
-        self.session_runs_played = 0
-        self.session_wins = 0
-        self.session_losses = 0
-        self.session_gems = 0
-        self.session_packs = 0
-        self.session_plays = 0
-        self.session_draws = 0
-        self.session_milestone_counts = {}
         self.recent_runs = []
+        self.session_start_run_count = 0
         self.run_goal_wins = None

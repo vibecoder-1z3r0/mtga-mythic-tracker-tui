@@ -150,10 +150,9 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   number.
 - Play/draw is tracked at two levels: `EventRun.plays`/`.draws` (computed
   live from that run's own games, same pattern as `.wins`/`.losses`) for
-  "this run"; `EventStats.session_plays`/`.session_draws` for the
-  session (a stored counter, incremented in `_complete_run()`). All-time
-  play/draw is `EventStats.alltime_plays`/`.alltime_draws` - see below,
-  it's computed rather than stored.
+  "this run"; `EventStats.session_plays`/`.session_draws` and
+  `.alltime_plays`/`.alltime_draws` for session/all-time - see below,
+  both are computed rather than stored.
 - **`recent_runs` was originally capped to the last 5 completed runs -
   removed.** That cap was never a requirement; it was added unprompted
   when event mode was first built, and it actively caused bugs: it forced
@@ -166,8 +165,8 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   every completed run for good (renaming it was considered and rejected -
   see the data-loss incident above - so the name is a bit stale but the
   field is unchanged, avoiding any migration risk).
-- With the cap gone, all-time totals are now **computed properties/
-  methods on `EventStats`**, not stored fields: `alltime_runs_played`
+- With the cap gone, all-time totals are **computed properties/methods on
+  `EventStats`**, not stored fields: `alltime_runs_played`
   (`len(recent_runs)`), `alltime_wins`/`.alltime_losses`/`.alltime_plays`/
   `.alltime_draws` (properties, sum over `recent_runs`), and
   `alltime_prize(event)`/`alltime_milestone_counts(event)` (methods,
@@ -177,14 +176,33 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   parallel counters that have to be kept in sync by hand - `_apply_edit()`
   in `EventGamesViewerModal` used to have to un-fold/re-fold `alltime_*`
   by hand when a completed run's game was edited; now editing `run` in
-  place (a member of `recent_runs`) is reflected automatically, and only
-  the still-stored `session_*` counters need manual adjustment.
-  `_reconstruct_event_stats()` needs no special migration case for any of
-  this - `_known_fields()` already drops any stale `alltime_*` keys from
-  an older save, and the properties just compute fresh from whatever's in
-  `recent_runs`. Session totals remain stored counters, since
-  `recent_runs` isn't session-scoped (spans past sessions too) - there's
-  no way to derive "this session's" totals from it after the fact. The
+  place (a member of `recent_runs`) is reflected automatically.
+- **Session totals went through the same treatment shortly after, for the
+  same reason.** They were left as stored counters in the first pass
+  (`session_wins`/`session_losses`/etc., incremented in `_complete_run()`)
+  since `recent_runs` isn't session-scoped and there was no obvious way to
+  derive "this session's" totals from it. That reasoning missed a real
+  bug: a user reported the session's "On the Play %" being wrong even
+  though the current session was the *only* session they'd ever played -
+  in that case session and all-time totals should be identical by
+  definition, but `session_plays`/`session_draws` had been added as
+  separately-tracked counters, so they only reflected runs completed
+  *after* those specific fields started being tracked, while
+  `alltime_plays`/`alltime_draws` (already computed from the full
+  history) correctly included everything. Fix: `EventStats` now has
+  `session_start_run_count: int` - the index into `recent_runs` marking
+  where the current session began (`len(recent_runs)` at the time
+  `restart_session()` is called, `0` by default). `session_runs_played`/
+  `session_wins`/`.session_losses`/`.session_plays`/`.session_draws` are
+  properties summing `recent_runs[session_start_run_count:]`, and
+  `session_prize(event)`/`session_milestone_counts(event)` are the
+  methods-needing-`event` equivalent, exactly mirroring the `alltime_*`
+  shape. `_complete_run()` is now just `self.recent_runs.append(run)` -
+  no separate session or all-time bookkeeping at all. This closes the bug
+  by construction: with `session_start_run_count == 0` (the only-ever-
+  session case), `_session_runs()` returns the same list `alltime_*` sums
+  over, so the two can never again disagree. `wipe_alltime()` resets
+  `session_start_run_count` to 0 along with clearing `recent_runs`. The
   Trends section shows only the last-10-games glyph sequences
   (`_all_event_games_chronological()` sliced to `[-10:]`) - no "On the
   Play %" summary line there anymore. That stat lives in the Session and
@@ -197,6 +215,17 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   and All-Time (removed earlier this session to fix Trends clipping) and
   removes one from Trends, a net +1 row - full Trends (including the
   Play/Draw glyph line) now needs an ~26-row terminal instead of 24.
+- The top bar's `.top-format` column (event entry cost) truncated instead
+  of wrapping when an event has multiple entry options and no run is
+  active yet - e.g. "💰 Entry: 5000 Gold / 1000 Gems" got chopped off
+  mid-text in a real terminal, since `.top-panel` was fixed at `height: 3`
+  (one content row after the border). Bumped to `height: 4` (two content
+  rows) so Rich/Textual's normal text wrapping shows the full line instead
+  of clipping it; the other three top-bar columns just get a bit of extra
+  vertical centering room, which is harmless. Verified at the actual
+  reported terminal size (121x30) via a headless pilot - full entry-cost
+  text now visible, and the stats panel (Session/All-Time/Trends) still
+  fits without scrolling despite the 1-row overhead this adds.
 - Six ranked-only actions (`toggle_mythic`, `set_season_start`,
   `edit_stats`, `hide_tiers`, `set_rank`, and `view_all_notes` — bound to
   M/T/E/H/S and Ctrl+N respectively) have no Event Mode behavior at all,
