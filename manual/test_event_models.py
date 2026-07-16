@@ -164,21 +164,22 @@ def test_event_stats_session_and_alltime_aggregation():
     assert stats.session_runs_played == 2
     assert stats.session_wins == 7  # unchanged, run2 had 0 wins
     assert stats.session_losses == 2
-    assert stats.alltime_gems == 1500 + 100  # trophy + 0-win run
+    assert stats.alltime_prize(event).gems == 1500 + 100  # trophy + 0-win run
 
-    # Restarting the session clears session_* but keeps alltime_*.
+    # Restarting the session clears session_* but keeps alltime_* (which is
+    # computed from recent_runs, untouched by restart_session()).
     stats.restart_session()
     assert stats.session_runs_played == 0
     assert stats.session_wins == 0
     assert stats.alltime_wins == 7  # unchanged
-    assert stats.alltime_gems == 1600  # unchanged
+    assert stats.alltime_prize(event).gems == 1600  # unchanged
 
 
 def test_event_stats_tracks_play_draw_cumulatively():
-    """Test that alltime_plays/alltime_draws are true running counters,
-    not derived from recent_runs (which is capped to the last 5
-    completed runs and would silently under-count an "overall"
-    percentage once more runs than that have been played)."""
+    """Test that alltime_plays/alltime_draws are computed across every
+    completed run in recent_runs (which is NOT capped - a "last N runs"
+    list can't answer an "overall" percentage correctly once you've
+    played more than N runs, which is why it holds full history)."""
     event = load_test_event()
     stats = EventStats()
 
@@ -188,8 +189,8 @@ def test_event_stats_tracks_play_draw_cumulatively():
         stats.record_game(EventGame(result=EventGameResult.LOSS, play_draw="Play"), event)
         stats.record_game(EventGame(result=EventGameResult.LOSS, play_draw="Draw"), event)
 
-    # 6 completed runs, each 1 Play + 1 Draw, but recent_runs only keeps the last 5.
-    assert len(stats.recent_runs) == 5
+    # 6 completed runs, each 1 Play + 1 Draw, and none evicted.
+    assert len(stats.recent_runs) == 6
     assert stats.alltime_plays == 6
     assert stats.alltime_draws == 6
 
@@ -203,7 +204,7 @@ def test_event_stats_tracks_play_draw_cumulatively():
     stats.restart_session()
     assert stats.session_plays == 0
     assert stats.session_draws == 0
-    assert stats.alltime_plays == 6  # unchanged
+    assert stats.alltime_plays == 6  # unchanged, still derived from recent_runs
 
     stats.wipe_alltime()
     assert stats.alltime_plays == 0
@@ -271,9 +272,9 @@ def test_event_stats_wipe_alltime_clears_everything():
     assert stats.alltime_runs_played == 0
     assert stats.alltime_wins == 0
     assert stats.alltime_losses == 0
-    assert stats.alltime_gems == 0
-    assert stats.alltime_packs == 0
-    assert stats.alltime_milestone_counts == {}
+    assert stats.alltime_prize(event).gems == 0
+    assert stats.alltime_prize(event).packs == 0
+    assert stats.alltime_milestone_counts(event) == {}
     assert stats.recent_runs == []
 
 
@@ -301,7 +302,7 @@ def test_event_stats_concede_run_folds_partial_record():
     assert stats.session_runs_played == 1
     assert stats.session_wins == 1
     assert stats.alltime_runs_played == 1
-    assert stats.alltime_gems == 150  # 1-win prize tier
+    assert stats.alltime_prize(event).gems == 150  # 1-win prize tier
 
     # Conceding again (no active run) is a safe no-op.
     assert stats.concede_run(event) is False
@@ -330,7 +331,7 @@ def test_state_manager_persists_event_stats():
         assert loaded.event_stats.event_id == event.event_id
         assert loaded.event_stats.session_wins == 6
         assert loaded.event_stats.session_losses == 2
-        assert loaded.event_stats.alltime_gems == 1200
+        assert loaded.event_stats.alltime_prize(event).gems == 1200
         assert loaded.event_stats.current_run.status == EventRunStatus.ENDED
         assert len(loaded.event_stats.recent_runs) == 1
         assert len(loaded.event_stats.recent_runs[0].games) == 8
@@ -346,10 +347,15 @@ def test_state_manager_survives_renamed_field_in_saved_file():
     old name, and the broad except in load_state() silently discarded
     the ENTIRE save file (ranks, sessions, event history) in response."""
     with tempfile.TemporaryDirectory() as temp_dir:
+        event = load_test_event()
+
         sm = StateManager(data_dir=Path(temp_dir), save_enabled=True)
         app_data = sm.load_state()
-        app_data.event_stats.event_id = "historic_pauper_challenge"
-        app_data.event_stats.alltime_wins = 42
+        app_data.event_stats.event_id = event.event_id
+        run = EventRun(run_id="r1", event_id=event.event_id, entry_currency="Gems")
+        app_data.event_stats.start_run(run)
+        for _ in range(7):
+            app_data.event_stats.record_game(EventGame(result=EventGameResult.WIN), event)
         sm.save_state(app_data)
 
         state_file = Path(temp_dir) / "tracker_state.json"
@@ -362,8 +368,8 @@ def test_state_manager_survives_renamed_field_in_saved_file():
         sm2 = StateManager(data_dir=Path(temp_dir), save_enabled=True)
         loaded = sm2.load_state()
 
-        assert loaded.event_stats.alltime_wins == 42
-        assert loaded.event_stats.event_id == "historic_pauper_challenge"
+        assert loaded.event_stats.alltime_wins == 7
+        assert loaded.event_stats.event_id == event.event_id
 
 
 def test_state_manager_deserializes_datetimes_nested_in_lists():
@@ -403,30 +409,28 @@ def test_state_manager_export_import_round_trip():
         app_data = sm.load_state()
         run = EventRun(run_id="r1", event_id=event.event_id, entry_currency="Gems")
         app_data.event_stats.start_run(run)
-        app_data.event_stats.record_game(EventGame(result=EventGameResult.WIN), event)
-        app_data.event_stats.alltime_wins = 5
+        for _ in range(7):
+            app_data.event_stats.record_game(EventGame(result=EventGameResult.WIN), event)
 
         export_path = sm.export_state(app_data)
         assert export_path.exists()
 
         imported = sm.import_state(export_path)
-        assert imported.event_stats.alltime_wins == 5
-        assert imported.event_stats.current_run.games[0].result == EventGameResult.WIN
+        assert imported.event_stats.alltime_wins == 7
+        assert imported.event_stats.recent_runs[0].games[0].result == EventGameResult.WIN
 
         # export_state() must not have touched the live (unrelated) state file.
         assert not sm.state_file.exists()
 
 
-def test_state_manager_backfills_alltime_play_draw_for_legacy_save():
-    """Regression test: a save file written before alltime_plays/
-    alltime_draws existed has neither key at all, so they'd otherwise
-    silently default to 0 and make the live current run look like the
-    ONLY play/draw data that ever existed. On load, _reconstruct_event_stats
-    should detect the missing keys and backfill alltime_plays/alltime_draws
-    from whatever play/draw data still survives in recent_runs. session_plays/
-    session_draws are deliberately left at 0 - recent_runs isn't session-
-    scoped, so there's no reliable way to attribute old runs to "this"
-    session."""
+def test_state_manager_recomputes_alltime_from_stale_stored_counters():
+    """Regression test: a save file written by an older version that still
+    stored alltime_wins/losses/gems/packs/plays/draws/milestone_counts as
+    plain fields (before they became computed from recent_runs) has all of
+    those stale keys in its JSON. Loading must not crash on them (they're
+    dropped by _known_fields() same as any other now-unrecognized field),
+    and the computed properties must reflect the real recent_runs history
+    rather than the stale stored numbers."""
     with tempfile.TemporaryDirectory() as temp_dir:
         event = load_test_event()
 
@@ -439,44 +443,36 @@ def test_state_manager_backfills_alltime_play_draw_for_legacy_save():
             EventGame(result=EventGameResult.WIN, play_draw="Play"), event
         )
         app_data.event_stats.record_game(
-            EventGame(result=EventGameResult.WIN, play_draw="Draw"), event
+            EventGame(result=EventGameResult.LOSS, play_draw="Draw"), event
         )
         app_data.event_stats.record_game(
             EventGame(result=EventGameResult.LOSS, play_draw="Play"), event
         )
-        app_data.event_stats.record_game(
-            EventGame(result=EventGameResult.LOSS, play_draw="Draw"), event
-        )
-        # loss_cap is 2, so this completed the run: alltime_plays/draws and
-        # session_plays/draws are both 2/2 at this point (2 plays, 2 draws).
-        assert app_data.event_stats.alltime_plays == 2
-        assert app_data.event_stats.session_plays == 2
-
-        # Simulate starting a NEW session after that run - session_plays/
-        # draws reset to 0, but recent_runs (and thus the completed run's
-        # play/draw history) survives, since restart_session() doesn't
-        # touch recent_runs.
-        app_data.event_stats.restart_session()
-        assert app_data.event_stats.session_plays == 0
+        # loss_cap is 2: this completed the run at 1 win, 2 losses.
+        assert len(app_data.event_stats.recent_runs) == 1
         sm.save_state(app_data)
 
         state_file = Path(temp_dir) / "tracker_state.json"
         data = json.loads(state_file.read_text())
-        # Simulate a save written before alltime_plays/alltime_draws existed.
-        del data["event_stats"]["alltime_plays"]
-        del data["event_stats"]["alltime_draws"]
+        # Simulate a save from before these became computed properties -
+        # deliberately wrong numbers, to prove they get ignored on load.
+        data["event_stats"]["alltime_wins"] = 999
+        data["event_stats"]["alltime_losses"] = 999
+        data["event_stats"]["alltime_gems"] = 999
+        data["event_stats"]["alltime_packs"] = 999
+        data["event_stats"]["alltime_plays"] = 999
+        data["event_stats"]["alltime_draws"] = 999
+        data["event_stats"]["alltime_milestone_counts"] = {"stale": 999}
         state_file.write_text(json.dumps(data, indent=2))
 
         sm2 = StateManager(data_dir=Path(temp_dir), save_enabled=True)
         reloaded = sm2.load_state()
 
+        assert reloaded.event_stats.alltime_wins == 1
+        assert reloaded.event_stats.alltime_losses == 2
         assert reloaded.event_stats.alltime_plays == 2
-        assert reloaded.event_stats.alltime_draws == 2
-        # session_plays/draws are honestly 0 for a legacy save - recent_runs
-        # spans past sessions too, so there's no way to know which of its
-        # runs belong to "this" session.
-        assert reloaded.event_stats.session_plays == 0
-        assert reloaded.event_stats.session_draws == 0
+        assert reloaded.event_stats.alltime_draws == 1
+        assert reloaded.event_stats.alltime_milestone_counts(event) == {}
 
 
 def main():
@@ -500,7 +496,7 @@ def main():
     test_state_manager_survives_renamed_field_in_saved_file()
     test_state_manager_deserializes_datetimes_nested_in_lists()
     test_state_manager_export_import_round_trip()
-    test_state_manager_backfills_alltime_play_draw_for_legacy_save()
+    test_state_manager_recomputes_alltime_from_stale_stored_counters()
     print("All manual-TUI event model tests passed!")
 
 

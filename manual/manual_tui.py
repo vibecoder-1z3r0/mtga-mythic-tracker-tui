@@ -31,6 +31,7 @@ from models import (
     EventRun,
     EventRunStatus,
     EventStats,
+    PrizeTotal,
     default_catalog_path,
     load_event_catalog,
 )
@@ -1020,10 +1021,9 @@ def _on_the_play_line(plays: int, draws: int) -> str:
 
 
 def _all_event_games_chronological(stats: EventStats) -> List[EventGame]:
-    """Every recorded game across recent completed runs plus the current
-    run, oldest first. recent_runs is already oldest-appended-first
-    (capped to the last 5 runs), so this just tacks the in-progress
-    run's games on the end."""
+    """Every recorded game across every completed run plus the current
+    run, oldest first. recent_runs is already oldest-appended-first, so
+    this just tacks the in-progress run's games on the end."""
     games: List[EventGame] = []
     for run in stats.recent_runs:
         games.extend(run.games)
@@ -1152,11 +1152,9 @@ class EventStatsPanel(Static):
             for g in recent
         )
 
-        # True cumulative counters, not just the games visible above -
-        # recent_runs (and therefore _all_event_games_chronological) is
-        # capped to the last 5 completed runs, which would silently
-        # under-count an "overall" percentage once more runs than that
-        # have been played.
+        # True cumulative totals across every completed run, not just the
+        # last 10 games shown above - alltime_plays/alltime_draws are
+        # computed over the full recent_runs history.
         live_wins, live_losses, live_gems, live_packs, live_plays, live_draws, has_active_run = (
             self._live_run_contribution()
         )
@@ -1220,10 +1218,12 @@ class EventStatsPanel(Static):
         live_wins, live_losses, live_gems, live_packs, live_plays, live_draws, has_active_run = (
             self._live_run_contribution()
         )
+        event = _get_event_for_stats(stats, self.event_catalog)
+        prize = stats.alltime_prize(event) if event else PrizeTotal()
         wins = stats.alltime_wins + live_wins
         losses = stats.alltime_losses + live_losses
-        gems = stats.alltime_gems + live_gems
-        packs = stats.alltime_packs + live_packs
+        gems = prize.gems + live_gems
+        packs = prize.packs + live_packs
 
         runs_played = str(stats.alltime_runs_played)
         if has_active_run:
@@ -1235,8 +1235,9 @@ class EventStatsPanel(Static):
             f"Record: [{wins}W] - [{losses}L]{_win_pct(wins, losses)}",
             f"Prize: {gems} gems, {packs} packs",
         ]
-        if stats.alltime_milestone_counts:
-            counts_str = ", ".join(f"{k}: {v}" for k, v in stats.alltime_milestone_counts.items())
+        milestone_counts = stats.alltime_milestone_counts(event) if event else {}
+        if milestone_counts:
+            counts_str = ", ".join(f"{k}: {v}" for k, v in milestone_counts.items())
             lines.append(f"Milestones: {counts_str}")
         return Static("\n".join(lines), classes="event-stat-section")
 
@@ -2665,8 +2666,11 @@ class EventGamesViewerModal(ModalScreen):
             game.result = new_result
             return
 
-        # Run already folded into totals: un-fold its old contribution,
-        # apply the edit, then re-fold the new contribution.
+        # Run already folded into totals: un-fold its old contribution from
+        # session (the stored counters), apply the edit, then re-fold the
+        # new contribution. All-time needs no such dance - it's computed
+        # live from recent_runs, so editing `run` in place (it's a member
+        # of that list) is reflected automatically.
         old_prize = run.prize(self.event)
         old_wins, old_losses = run.wins, run.losses
         old_milestones = {m.name for m in self.event.milestones_met(old_wins)}
@@ -2682,17 +2686,11 @@ class EventGamesViewerModal(ModalScreen):
         stats.session_losses += new_losses - old_losses
         stats.session_gems += new_prize.gems - old_prize.gems
         stats.session_packs += new_prize.packs - old_prize.packs
-        stats.alltime_wins += new_wins - old_wins
-        stats.alltime_losses += new_losses - old_losses
-        stats.alltime_gems += new_prize.gems - old_prize.gems
-        stats.alltime_packs += new_prize.packs - old_prize.packs
 
         for name in old_milestones - new_milestones:
             stats.session_milestone_counts[name] = max(0, stats.session_milestone_counts.get(name, 0) - 1)
-            stats.alltime_milestone_counts[name] = max(0, stats.alltime_milestone_counts.get(name, 0) - 1)
         for name in new_milestones - old_milestones:
             stats.session_milestone_counts[name] = stats.session_milestone_counts.get(name, 0) + 1
-            stats.alltime_milestone_counts[name] = stats.alltime_milestone_counts.get(name, 0) + 1
 
     def action_cancel(self) -> None:
         self.dismiss("updated" if self.has_changes else None)

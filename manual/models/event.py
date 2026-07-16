@@ -269,20 +269,49 @@ class EventStats:
     session_draws: int = 0
     session_milestone_counts: Dict[str, int] = field(default_factory=dict)
 
-    alltime_runs_played: int = 0
-    alltime_wins: int = 0
-    alltime_losses: int = 0
-    alltime_gems: int = 0
-    alltime_packs: int = 0
-    # Cumulative, unlike recent_runs (capped to the last 5) - a "last N
-    # completed runs" list can't answer "overall play/draw %" correctly
-    # once you've played more than N runs, so these need their own
-    # running counters just like alltime_wins/alltime_losses do.
-    alltime_plays: int = 0
-    alltime_draws: int = 0
-    alltime_milestone_counts: Dict[str, int] = field(default_factory=dict)
-
+    # Every completed run ever played, in completion order. All-time totals
+    # are computed from this rather than stored as separate counters, so
+    # there's only one source of truth and nothing to keep in sync. Not
+    # session-scoped (spans past sessions too), which is why session_*
+    # above still needs its own counters.
     recent_runs: List[EventRun] = field(default_factory=list)
+
+    @property
+    def alltime_runs_played(self) -> int:
+        return len(self.recent_runs)
+
+    @property
+    def alltime_wins(self) -> int:
+        return sum(r.wins for r in self.recent_runs)
+
+    @property
+    def alltime_losses(self) -> int:
+        return sum(r.losses for r in self.recent_runs)
+
+    @property
+    def alltime_plays(self) -> int:
+        return sum(r.plays for r in self.recent_runs)
+
+    @property
+    def alltime_draws(self) -> int:
+        return sum(r.draws for r in self.recent_runs)
+
+    def alltime_prize(self, event: EventDefinition) -> PrizeTotal:
+        """Total prize earned across every completed run."""
+        total = PrizeTotal()
+        for run in self.recent_runs:
+            prize = run.prize(event)
+            total = total + PrizeTotal(gems=prize.gems, packs=prize.packs)
+        return total
+
+    def alltime_milestone_counts(self, event: EventDefinition) -> Dict[str, int]:
+        """Cumulative milestone tally across every completed run - a 7-win
+        run counts toward "3+ wins", "5+ wins", etc. all at once."""
+        counts: Dict[str, int] = {}
+        for run in self.recent_runs:
+            for milestone in event.milestones_met(run.wins):
+                counts[milestone.name] = counts.get(milestone.name, 0) + 1
+        return counts
 
     def start_run(self, run: EventRun) -> None:
         """Start a new run, replacing any existing (presumably ended) one."""
@@ -310,7 +339,9 @@ class EventStats:
         return True
 
     def _complete_run(self, run: EventRun, event: EventDefinition) -> None:
-        """Fold a just-completed run's results into session/all-time totals."""
+        """Fold a just-completed run's results into session totals and the
+        completed-run history (all-time totals are computed from that
+        history, not tracked here)."""
         prize = run.prize(event)
 
         self.session_runs_played += 1
@@ -318,31 +349,15 @@ class EventStats:
         self.session_losses += run.losses
         self.session_gems += prize.gems
         self.session_packs += prize.packs
-
-        self.alltime_runs_played += 1
-        self.alltime_wins += run.wins
-        self.alltime_losses += run.losses
-        self.alltime_gems += prize.gems
-        self.alltime_packs += prize.packs
-
-        plays = sum(1 for g in run.games if g.play_draw == "Play")
-        draws = sum(1 for g in run.games if g.play_draw == "Draw")
-        self.session_plays += plays
-        self.session_draws += draws
-        self.alltime_plays += plays
-        self.alltime_draws += draws
+        self.session_plays += run.plays
+        self.session_draws += run.draws
 
         for milestone in event.milestones_met(run.wins):
             self.session_milestone_counts[milestone.name] = (
                 self.session_milestone_counts.get(milestone.name, 0) + 1
             )
-            self.alltime_milestone_counts[milestone.name] = (
-                self.alltime_milestone_counts.get(milestone.name, 0) + 1
-            )
 
         self.recent_runs.append(run)
-        if len(self.recent_runs) > 5:
-            self.recent_runs = self.recent_runs[-5:]
 
     def restart_session(self) -> None:
         """Reset session-scoped counters but keep all-time totals (mirrors
@@ -371,13 +386,5 @@ class EventStats:
         self.session_plays = 0
         self.session_draws = 0
         self.session_milestone_counts = {}
-        self.alltime_runs_played = 0
-        self.alltime_wins = 0
-        self.alltime_losses = 0
-        self.alltime_gems = 0
-        self.alltime_packs = 0
-        self.alltime_plays = 0
-        self.alltime_draws = 0
-        self.alltime_milestone_counts = {}
         self.recent_runs = []
         self.run_goal_wins = None

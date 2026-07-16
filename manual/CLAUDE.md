@@ -142,34 +142,49 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   counts are deliberately NOT given the same live treatment - they read
   as "confirmed achievements from completed runs," not a fluctuating
   number.
-- Play/draw is tracked at all three levels: `EventRun.plays`/`.draws`
-  (computed live from that run's own games, same pattern as `.wins`/
-  `.losses`) for "this run"; `EventStats.session_plays`/`.session_draws`
-  for the session; `EventStats.alltime_plays`/`.alltime_draws` for
-  all-time. The all-time pair are genuine running counters incremented
-  in `_complete_run()` - NOT derived from `recent_runs`, which is capped
-  to the last 5 completed runs and would silently under-count an
-  "overall" percentage once more runs than that have been played. The
-  Trends section's last-10 *glyph sequence* still legitimately uses the
-  capped `_all_event_games_chronological()` (that's supposed to be a
-  recent window), but its summary "On the Play %" line uses the
-  uncapped `alltime_plays`/`alltime_draws` + live run instead, for the
-  same reason the stats panel does. `_on_the_play_line()` is the shared
-  formatter for all three "On the Play: N% (X/Y known)" lines.
-- Adding `alltime_plays`/`alltime_draws` as new fields exposed a
-  legacy-save gap: anyone whose save file predates those fields has them
-  silently default to `0` on load (normal `_known_fields()` behavior, not
-  a crash), which made the live current run's contribution look like the
-  *entire* all-time play/draw history. `StateManager._reconstruct_event_stats()`
-  now checks `'alltime_plays' not in stats_dict` *before* `_known_fields()`
-  filtering drops the never-existed key, and if so, backfills
-  `alltime_plays`/`alltime_draws` by summing `play_draw` over whatever
-  survives in the (5-run-capped) `recent_runs` - a best-effort correction,
-  since runs beyond that cap are already gone. `session_plays`/
-  `session_draws` are deliberately NOT backfilled the same way:
-  `recent_runs` isn't reset by `restart_session()`, so it can span
-  multiple past sessions with no reliable way to attribute old runs to
-  "this" session - starting at 0 for a legacy save is the honest answer.
+- Play/draw is tracked at two levels: `EventRun.plays`/`.draws` (computed
+  live from that run's own games, same pattern as `.wins`/`.losses`) for
+  "this run"; `EventStats.session_plays`/`.session_draws` for the
+  session (a stored counter, incremented in `_complete_run()`). All-time
+  play/draw is `EventStats.alltime_plays`/`.alltime_draws` - see below,
+  it's computed rather than stored.
+- **`recent_runs` was originally capped to the last 5 completed runs -
+  removed.** That cap was never a requirement; it was added unprompted
+  when event mode was first built, and it actively caused bugs: it forced
+  `alltime_wins`/`alltime_losses`/`alltime_gems`/`alltime_packs` to be
+  separately-maintained counters (since the run list itself couldn't
+  answer "all-time" once older runs fell off the cap), which then needed
+  its own `alltime_plays`/`alltime_draws` counters added later for the
+  same reason, which THEN needed a legacy-save-migration workaround
+  because existing saves predated those fields. `recent_runs` now holds
+  every completed run for good (renaming it was considered and rejected -
+  see the data-loss incident above - so the name is a bit stale but the
+  field is unchanged, avoiding any migration risk).
+- With the cap gone, all-time totals are now **computed properties/
+  methods on `EventStats`**, not stored fields: `alltime_runs_played`
+  (`len(recent_runs)`), `alltime_wins`/`.alltime_losses`/`.alltime_plays`/
+  `.alltime_draws` (properties, sum over `recent_runs`), and
+  `alltime_prize(event)`/`alltime_milestone_counts(event)` (methods,
+  since prize tiers and milestone thresholds need the `EventDefinition`
+  to resolve - mirrors `EventRun.prize(event)`, which already needed the
+  same argument). One source of truth (the run list itself) instead of
+  parallel counters that have to be kept in sync by hand - `_apply_edit()`
+  in `EventGamesViewerModal` used to have to un-fold/re-fold `alltime_*`
+  by hand when a completed run's game was edited; now editing `run` in
+  place (a member of `recent_runs`) is reflected automatically, and only
+  the still-stored `session_*` counters need manual adjustment.
+  `_reconstruct_event_stats()` needs no special migration case for any of
+  this - `_known_fields()` already drops any stale `alltime_*` keys from
+  an older save, and the properties just compute fresh from whatever's in
+  `recent_runs`. Session totals remain stored counters, since
+  `recent_runs` isn't session-scoped (spans past sessions too) - there's
+  no way to derive "this session's" totals from it after the fact. The
+  Trends section's last-10 *glyph sequence* still uses
+  `_all_event_games_chronological()` sliced to `[-10:]` (that's supposed
+  to be a recent window), but its summary "On the Play %" line uses
+  `alltime_plays`/`alltime_draws` + the live run instead, for a true
+  all-time percentage. `_on_the_play_line()` is the shared formatter for
+  all three "On the Play: N% (X/Y known)" lines.
 - Six ranked-only actions (`toggle_mythic`, `set_season_start`,
   `edit_stats`, `hide_tiers`, `set_rank`, and `view_all_notes` — bound to
   M/T/E/H/S and Ctrl+N respectively) have no Event Mode behavior at all,
