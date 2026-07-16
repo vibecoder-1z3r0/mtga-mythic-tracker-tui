@@ -417,6 +417,68 @@ def test_state_manager_export_import_round_trip():
         assert not sm.state_file.exists()
 
 
+def test_state_manager_backfills_alltime_play_draw_for_legacy_save():
+    """Regression test: a save file written before alltime_plays/
+    alltime_draws existed has neither key at all, so they'd otherwise
+    silently default to 0 and make the live current run look like the
+    ONLY play/draw data that ever existed. On load, _reconstruct_event_stats
+    should detect the missing keys and backfill alltime_plays/alltime_draws
+    from whatever play/draw data still survives in recent_runs. session_plays/
+    session_draws are deliberately left at 0 - recent_runs isn't session-
+    scoped, so there's no reliable way to attribute old runs to "this"
+    session."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        event = load_test_event()
+
+        sm = StateManager(data_dir=Path(temp_dir), save_enabled=True)
+        app_data = sm.load_state()
+
+        run1 = EventRun(run_id="r1", event_id=event.event_id, entry_currency="Gems")
+        app_data.event_stats.start_run(run1)
+        app_data.event_stats.record_game(
+            EventGame(result=EventGameResult.WIN, play_draw="Play"), event
+        )
+        app_data.event_stats.record_game(
+            EventGame(result=EventGameResult.WIN, play_draw="Draw"), event
+        )
+        app_data.event_stats.record_game(
+            EventGame(result=EventGameResult.LOSS, play_draw="Play"), event
+        )
+        app_data.event_stats.record_game(
+            EventGame(result=EventGameResult.LOSS, play_draw="Draw"), event
+        )
+        # loss_cap is 2, so this completed the run: alltime_plays/draws and
+        # session_plays/draws are both 2/2 at this point (2 plays, 2 draws).
+        assert app_data.event_stats.alltime_plays == 2
+        assert app_data.event_stats.session_plays == 2
+
+        # Simulate starting a NEW session after that run - session_plays/
+        # draws reset to 0, but recent_runs (and thus the completed run's
+        # play/draw history) survives, since restart_session() doesn't
+        # touch recent_runs.
+        app_data.event_stats.restart_session()
+        assert app_data.event_stats.session_plays == 0
+        sm.save_state(app_data)
+
+        state_file = Path(temp_dir) / "tracker_state.json"
+        data = json.loads(state_file.read_text())
+        # Simulate a save written before alltime_plays/alltime_draws existed.
+        del data["event_stats"]["alltime_plays"]
+        del data["event_stats"]["alltime_draws"]
+        state_file.write_text(json.dumps(data, indent=2))
+
+        sm2 = StateManager(data_dir=Path(temp_dir), save_enabled=True)
+        reloaded = sm2.load_state()
+
+        assert reloaded.event_stats.alltime_plays == 2
+        assert reloaded.event_stats.alltime_draws == 2
+        # session_plays/draws are honestly 0 for a legacy save - recent_runs
+        # spans past sessions too, so there's no way to know which of its
+        # runs belong to "this" session.
+        assert reloaded.event_stats.session_plays == 0
+        assert reloaded.event_stats.session_draws == 0
+
+
 def main():
     """Run all event model tests."""
     test_load_event_catalog()
@@ -438,6 +500,7 @@ def main():
     test_state_manager_survives_renamed_field_in_saved_file()
     test_state_manager_deserializes_datetimes_nested_in_lists()
     test_state_manager_export_import_round_trip()
+    test_state_manager_backfills_alltime_play_draw_for_legacy_save()
     print("All manual-TUI event model tests passed!")
 
 

@@ -327,9 +327,29 @@ class StateManager:
     def _reconstruct_event_stats(self, stats_dict: dict) -> EventStats:
         """Rebuild EventStats (and its nested runs) from serialized form."""
         stats_dict = dict(stats_dict)
+        # A save from before alltime_plays/alltime_draws existed won't have
+        # these keys at all - detect that *before* _known_fields drops them
+        # as unrecognized, so we can backfill from whatever play/draw data
+        # still survives in recent_runs (older runs beyond that 5-run cap
+        # are already gone - this is a best-effort correction, not perfect).
+        is_legacy_save = 'alltime_plays' not in stats_dict
+
         if stats_dict.get('current_run'):
             stats_dict['current_run'] = self._reconstruct_event_run(stats_dict['current_run'])
         stats_dict['recent_runs'] = [
             self._reconstruct_event_run(r) for r in stats_dict.get('recent_runs', [])
         ]
-        return EventStats(**_known_fields(EventStats, stats_dict))
+        stats = EventStats(**_known_fields(EventStats, stats_dict))
+
+        if is_legacy_save:
+            plays = sum(1 for run in stats.recent_runs for g in run.games if g.play_draw == "Play")
+            draws = sum(1 for run in stats.recent_runs for g in run.games if g.play_draw == "Draw")
+            stats.alltime_plays = plays
+            stats.alltime_draws = draws
+            # session_plays/session_draws deliberately NOT backfilled the
+            # same way: recent_runs isn't reset on restart_session(), so it
+            # can span multiple past sessions - there's no reliable way to
+            # tell which of those runs belong to "this" session. Starting
+            # session_plays at 0 for a legacy save is the honest answer.
+
+        return stats

@@ -1055,14 +1055,14 @@ class EventRunPanel(Static):
     def _create_run_section(self) -> Static:
         event = _get_event_for_stats(self.app_data.event_stats, self.event_catalog)
         if not event:
-            return Static("No events configured in events.json", classes="session-section")
+            return Static("No events configured in events.json", classes="event-stat-section")
 
         run = self.app_data.event_stats.current_run
         lines = ["🎮 CURRENT RUN", ""]
 
         if not run:
             lines.append("No active run. Press [U] to start a new run.")
-            return Static("\n".join(lines), classes="session-section")
+            return Static("\n".join(lines), classes="event-stat-section")
 
         win_bars = "".join(
             "[rgb(255,215,0)][██][/rgb(255,215,0)]" if i < run.wins else "[  ]"
@@ -1113,7 +1113,7 @@ class EventRunPanel(Static):
             lines.append("")
             lines.append("[bold green]Run complete! Press [U] for a new run.[/bold green]")
 
-        return Static("\n".join(lines), classes="session-section")
+        return Static("\n".join(lines), classes="event-stat-section")
 
 
 class EventStatsPanel(Static):
@@ -1127,18 +1127,15 @@ class EventStatsPanel(Static):
     def compose(self) -> ComposeResult:
         with Vertical():
             yield self._create_session_section()
-            yield Static("─" * 30, classes="separator")
             yield self._create_alltime_section()
-            yield Static("─" * 30, classes="separator")
             yield self._create_trends_section()
-            yield Static("─" * 30, classes="separator")
 
     def _create_trends_section(self) -> Static:
         stats = self.app_data.event_stats
         games = _all_event_games_chronological(stats)
 
         if not games:
-            return Static("📈 TRENDS\nNo games recorded yet.", classes="session-section")
+            return Static("📈 TRENDS\nNo games recorded yet.", classes="event-stat-section")
 
         # Most recent game on the left, falling off to the right as it ages.
         recent = list(reversed(games[-10:]))
@@ -1173,7 +1170,7 @@ class EventStatsPanel(Static):
             _on_the_play_line(overall_plays, overall_draws),
         ]
 
-        return Static("\n".join(lines), classes="session-section")
+        return Static("\n".join(lines), classes="event-stat-section")
 
     def _live_run_contribution(self):
         """The current run's in-progress wins/losses/prize/plays/draws, to
@@ -1202,8 +1199,6 @@ class EventStatsPanel(Static):
         losses = stats.session_losses + live_losses
         gems = stats.session_gems + live_gems
         packs = stats.session_packs + live_packs
-        plays = stats.session_plays + live_plays
-        draws = stats.session_draws + live_draws
 
         runs_played = str(stats.session_runs_played)
         if has_active_run:
@@ -1214,12 +1209,11 @@ class EventStatsPanel(Static):
             f"Runs played: {runs_played}",
             f"Record: [{wins}W] - [{losses}L]{_win_pct(wins, losses)}",
             f"Prize: {gems} gems, {packs} packs",
-            _on_the_play_line(plays, draws),
         ]
         if stats.session_milestone_counts:
             counts_str = ", ".join(f"{k}: {v}" for k, v in stats.session_milestone_counts.items())
             lines.append(f"Milestones: {counts_str}")
-        return Static("\n".join(lines), classes="session-section")
+        return Static("\n".join(lines), classes="event-stat-section")
 
     def _create_alltime_section(self) -> Static:
         stats = self.app_data.event_stats
@@ -1230,8 +1224,6 @@ class EventStatsPanel(Static):
         losses = stats.alltime_losses + live_losses
         gems = stats.alltime_gems + live_gems
         packs = stats.alltime_packs + live_packs
-        plays = stats.alltime_plays + live_plays
-        draws = stats.alltime_draws + live_draws
 
         runs_played = str(stats.alltime_runs_played)
         if has_active_run:
@@ -1242,12 +1234,11 @@ class EventStatsPanel(Static):
             f"Runs played: {runs_played}",
             f"Record: [{wins}W] - [{losses}L]{_win_pct(wins, losses)}",
             f"Prize: {gems} gems, {packs} packs",
-            _on_the_play_line(plays, draws),
         ]
         if stats.alltime_milestone_counts:
             counts_str = ", ".join(f"{k}: {v}" for k, v in stats.alltime_milestone_counts.items())
             lines.append(f"Milestones: {counts_str}")
-        return Static("\n".join(lines), classes="season-section")
+        return Static("\n".join(lines), classes="event-stat-section")
 
 
 class EditStatsModal(ModalScreen):
@@ -3014,6 +3005,10 @@ class ManualTUIApp(App):
     
     .goal-section, .session-section, .season-section, .history-section {
         margin: 1 0;
+    }
+
+    .event-stat-section {
+        margin: 0 0 1 0;
     }
     
     .modal-container {

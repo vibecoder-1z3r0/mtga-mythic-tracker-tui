@@ -111,13 +111,23 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   All-Time Stats ─") were removed from `EventRunPanel`/`EventStatsPanel`
   as redundant screen real estate — the top bar already names the event,
   and the run panel's own duplicate "🎮 {event.name} ({event.format})"
-  line was replaced with a plain "🎮 CURRENT RUN" label. Freeing that
-  vertical space is also what fixed the Trends section getting clipped
-  at typical terminal heights, since `.left-panel`/`.right-panel` scroll
-  (`overflow-y: auto`) but a shorter, unscrolled render is what you
-  actually see in a normal-height terminal. `_win_pct()` adds a
-  "(55.6%)" suffix to the session/all-time Record lines, blank if no
+  line was replaced with a plain "🎮 CURRENT RUN" label. `_win_pct()` adds
+  a "(55.6%)" suffix to the session/all-time Record lines, blank if no
   games have been completed yet (division by zero guard).
+- The header removal above was NOT enough to stop Trends from getting
+  clipped in a real (smaller) terminal - my own pilot-test screenshots
+  were rendered at 100x40, far roomier than a typical terminal. The
+  actual culprit turned out to be CSS: `.session-section`/`.season-section`
+  (shared with ranked mode's own panels) carry `margin: 1 0`, and
+  `EventStatsPanel` renders three separate `Static` widgets (session/
+  all-time/trends) each paying that top+bottom margin tax - 6 extra rows
+  of pure whitespace - on top of 3 now-removed `"─" * 30` separator
+  `Static`s between them. Fix: event-mode-only sections got their own
+  `.event-stat-section` class (`margin: 0 0 1 0` - bottom only) instead of
+  reusing the ranked classes, and the separators were dropped entirely
+  (the emoji headers already visually separate the sections). Verified
+  via a headless pilot at a real 80x24 - Session, All-Time, and Trends all
+  now render with no scrolling needed, down from needing 100x40+ before.
 - Session/All-Time Record, Prize, "Runs played", and Play/Draw % all
   include the current in-progress run's live contribution, not just
   completed runs - `EventStatsPanel._live_run_contribution()` computes
@@ -146,6 +156,20 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   uncapped `alltime_plays`/`alltime_draws` + live run instead, for the
   same reason the stats panel does. `_on_the_play_line()` is the shared
   formatter for all three "On the Play: N% (X/Y known)" lines.
+- Adding `alltime_plays`/`alltime_draws` as new fields exposed a
+  legacy-save gap: anyone whose save file predates those fields has them
+  silently default to `0` on load (normal `_known_fields()` behavior, not
+  a crash), which made the live current run's contribution look like the
+  *entire* all-time play/draw history. `StateManager._reconstruct_event_stats()`
+  now checks `'alltime_plays' not in stats_dict` *before* `_known_fields()`
+  filtering drops the never-existed key, and if so, backfills
+  `alltime_plays`/`alltime_draws` by summing `play_draw` over whatever
+  survives in the (5-run-capped) `recent_runs` - a best-effort correction,
+  since runs beyond that cap are already gone. `session_plays`/
+  `session_draws` are deliberately NOT backfilled the same way:
+  `recent_runs` isn't reset by `restart_session()`, so it can span
+  multiple past sessions with no reliable way to attribute old runs to
+  "this" session - starting at 0 for a legacy save is the honest answer.
 - Six ranked-only actions (`toggle_mythic`, `set_season_start`,
   `edit_stats`, `hide_tiers`, `set_rank`, and `view_all_notes` — bound to
   M/T/E/H/S and Ctrl+N respectively) have no Event Mode behavior at all,
