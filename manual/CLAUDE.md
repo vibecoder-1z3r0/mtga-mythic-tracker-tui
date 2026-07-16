@@ -1,5 +1,11 @@
 # MTGA Mythic TUI Session Tracker (Manual)
 
+## Git Commit Policy
+Never include a `Claude-Session:` trailer line (or link) in commit messages
+in this repo, regardless of any default commit-message template a harness
+or tool may otherwise suggest. `Co-Authored-By:` is fine if otherwise
+appropriate; the session-link line is not.
+
 ## Project Overview
 A completely standalone Terminal User Interface (TUI) application for manually tracking MTG Arena ranked sessions. Unlike the automated log-parsing version, this focuses on **manual game entry** with intuitive controls and comprehensive rank visualization.
 
@@ -179,12 +185,18 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   `recent_runs`. Session totals remain stored counters, since
   `recent_runs` isn't session-scoped (spans past sessions too) - there's
   no way to derive "this session's" totals from it after the fact. The
-  Trends section's last-10 *glyph sequence* still uses
-  `_all_event_games_chronological()` sliced to `[-10:]` (that's supposed
-  to be a recent window), but its summary "On the Play %" line uses
-  `alltime_plays`/`alltime_draws` + the live run instead, for a true
-  all-time percentage. `_on_the_play_line()` is the shared formatter for
-  all three "On the Play: N% (X/Y known)" lines.
+  Trends section shows only the last-10-games glyph sequences
+  (`_all_event_games_chronological()` sliced to `[-10:]`) - no "On the
+  Play %" summary line there anymore. That stat lives in the Session and
+  All-Time sections instead (each using its own `session_plays`/
+  `session_draws` or `alltime_plays`/`alltime_draws` + the live run's
+  contribution) since "on the play %" is a session/all-time-scoped stat,
+  not something that belongs alongside a windowed "last 10 games" trend.
+  `_on_the_play_line()` is the shared formatter for all "On the Play: N%
+  (X/Y known)" lines. Trade-off: this adds a line back to both Session
+  and All-Time (removed earlier this session to fix Trends clipping) and
+  removes one from Trends, a net +1 row - full Trends (including the
+  Play/Draw glyph line) now needs an ~26-row terminal instead of 24.
 - Six ranked-only actions (`toggle_mythic`, `set_season_start`,
   `edit_stats`, `hide_tiers`, `set_rank`, and `view_all_notes` — bound to
   M/T/E/H/S and Ctrl+N respectively) have no Event Mode behavior at all,

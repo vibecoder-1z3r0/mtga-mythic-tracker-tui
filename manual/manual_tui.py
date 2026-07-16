@@ -1152,20 +1152,10 @@ class EventStatsPanel(Static):
             for g in recent
         )
 
-        # True cumulative totals across every completed run, not just the
-        # last 10 games shown above - alltime_plays/alltime_draws are
-        # computed over the full recent_runs history.
-        live_wins, live_losses, live_gems, live_packs, live_plays, live_draws, has_active_run = (
-            self._live_run_contribution()
-        )
-        overall_plays = stats.alltime_plays + live_plays
-        overall_draws = stats.alltime_draws + live_draws
-
         lines = [
             "📈 TRENDS (Last 10 Games)",
             f"Results:   {result_glyphs}",
             f"Play/Draw: {play_draw_glyphs}",
-            _on_the_play_line(overall_plays, overall_draws),
         ]
 
         return Static("\n".join(lines), classes="event-stat-section")
@@ -1202,11 +1192,15 @@ class EventStatsPanel(Static):
         if has_active_run:
             runs_played += " (+1 in progress)"
 
+        plays = stats.session_plays + live_plays
+        draws = stats.session_draws + live_draws
+
         lines = [
             "📊 CURRENT SESSION",
             f"Runs played: {runs_played}",
             f"Record: [{wins}W] - [{losses}L]{_win_pct(wins, losses)}",
             f"Prize: {gems} gems, {packs} packs",
+            _on_the_play_line(plays, draws),
         ]
         if stats.session_milestone_counts:
             counts_str = ", ".join(f"{k}: {v}" for k, v in stats.session_milestone_counts.items())
@@ -1229,11 +1223,15 @@ class EventStatsPanel(Static):
         if has_active_run:
             runs_played += " (+1 in progress)"
 
+        plays = stats.alltime_plays + live_plays
+        draws = stats.alltime_draws + live_draws
+
         lines = [
             "🏆 ALL-TIME TOTAL",
             f"Runs played: {runs_played}",
             f"Record: [{wins}W] - [{losses}L]{_win_pct(wins, losses)}",
             f"Prize: {gems} gems, {packs} packs",
+            _on_the_play_line(plays, draws),
         ]
         milestone_counts = stats.alltime_milestone_counts(event) if event else {}
         if milestone_counts:

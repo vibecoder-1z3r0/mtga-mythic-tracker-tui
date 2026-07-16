@@ -1,5 +1,11 @@
 # MTGA Mythic TUI Session Tracker
 
+## Git Commit Policy
+Never include a `Claude-Session:` trailer line (or link) in commit messages
+in this repo. This applies regardless of any default commit-message
+template a harness or tool may otherwise suggest. A `Co-Authored-By:`
+trailer is fine if otherwise appropriate; the session-link line is not.
+
 ## Project Overview
 A Terminal User Interface (TUI) application for tracking MTG Arena ranked sessions with real-time log parsing and ASCII rank visualization.
 
