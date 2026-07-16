@@ -186,6 +186,14 @@ class EventRun:
     def losses(self) -> int:
         return sum(1 for g in self.games if g.result == EventGameResult.LOSS)
 
+    @property
+    def plays(self) -> int:
+        return sum(1 for g in self.games if g.play_draw == "Play")
+
+    @property
+    def draws(self) -> int:
+        return sum(1 for g in self.games if g.play_draw == "Draw")
+
     def is_complete(self, event: EventDefinition) -> bool:
         """Check if this run has reached the event's win or loss cap."""
         return self.wins >= event.win_cap or self.losses >= event.loss_cap
@@ -257,6 +265,8 @@ class EventStats:
     session_losses: int = 0
     session_gems: int = 0
     session_packs: int = 0
+    session_plays: int = 0
+    session_draws: int = 0
     session_milestone_counts: Dict[str, int] = field(default_factory=dict)
 
     alltime_runs_played: int = 0
@@ -264,6 +274,12 @@ class EventStats:
     alltime_losses: int = 0
     alltime_gems: int = 0
     alltime_packs: int = 0
+    # Cumulative, unlike recent_runs (capped to the last 5) - a "last N
+    # completed runs" list can't answer "overall play/draw %" correctly
+    # once you've played more than N runs, so these need their own
+    # running counters just like alltime_wins/alltime_losses do.
+    alltime_plays: int = 0
+    alltime_draws: int = 0
     alltime_milestone_counts: Dict[str, int] = field(default_factory=dict)
 
     recent_runs: List[EventRun] = field(default_factory=list)
@@ -309,6 +325,13 @@ class EventStats:
         self.alltime_gems += prize.gems
         self.alltime_packs += prize.packs
 
+        plays = sum(1 for g in run.games if g.play_draw == "Play")
+        draws = sum(1 for g in run.games if g.play_draw == "Draw")
+        self.session_plays += plays
+        self.session_draws += draws
+        self.alltime_plays += plays
+        self.alltime_draws += draws
+
         for milestone in event.milestones_met(run.wins):
             self.session_milestone_counts[milestone.name] = (
                 self.session_milestone_counts.get(milestone.name, 0) + 1
@@ -331,6 +354,8 @@ class EventStats:
         self.session_losses = 0
         self.session_gems = 0
         self.session_packs = 0
+        self.session_plays = 0
+        self.session_draws = 0
         self.session_milestone_counts = {}
 
     def wipe_alltime(self) -> None:
@@ -343,12 +368,16 @@ class EventStats:
         self.session_losses = 0
         self.session_gems = 0
         self.session_packs = 0
+        self.session_plays = 0
+        self.session_draws = 0
         self.session_milestone_counts = {}
         self.alltime_runs_played = 0
         self.alltime_wins = 0
         self.alltime_losses = 0
         self.alltime_gems = 0
         self.alltime_packs = 0
+        self.alltime_plays = 0
+        self.alltime_draws = 0
         self.alltime_milestone_counts = {}
         self.recent_runs = []
         self.run_goal_wins = None

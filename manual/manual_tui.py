@@ -1008,6 +1008,17 @@ def _win_pct(wins: int, losses: int) -> str:
     return f" ({100 * wins / total:.1f}%)"
 
 
+def _on_the_play_line(plays: int, draws: int) -> str:
+    """'On the Play: N/M (Z%)' line, or a placeholder if nothing's known
+    yet. Denominator is only games with a *known* play/draw value -
+    unrecorded games (play_draw=None) aren't counted either way."""
+    known = plays + draws
+    if known == 0:
+        return "On the Play: no data yet"
+    pct = round(100 * plays / known)
+    return f"On the Play: {pct}% ({plays}/{known} known)"
+
+
 def _all_event_games_chronological(stats: EventStats) -> List[EventGame]:
     """Every recorded game across recent completed runs plus the current
     run, oldest first. recent_runs is already oldest-appended-first
@@ -1085,6 +1096,7 @@ class EventRunPanel(Static):
             play_draw = _format_play_draw(last_game.play_draw)
             opp_deck = last_game.opponent_deck or "Unknown"
             lines.append(f"Last game: {play_draw}, vs {opp_deck}")
+            lines.append(f"This run - {_on_the_play_line(run.plays, run.draws)}")
 
         prize = run.prize(event)
         lines.append(f"Prize so far: {prize.gems} gems, {prize.packs} packs")
@@ -1143,47 +1155,55 @@ class EventStatsPanel(Static):
             for g in recent
         )
 
-        known_play_draw = [g for g in games if g.play_draw in ("Play", "Draw")]
-        play_count = sum(1 for g in known_play_draw if g.play_draw == "Play")
+        # True cumulative counters, not just the games visible above -
+        # recent_runs (and therefore _all_event_games_chronological) is
+        # capped to the last 5 completed runs, which would silently
+        # under-count an "overall" percentage once more runs than that
+        # have been played.
+        live_wins, live_losses, live_gems, live_packs, live_plays, live_draws, has_active_run = (
+            self._live_run_contribution()
+        )
+        overall_plays = stats.alltime_plays + live_plays
+        overall_draws = stats.alltime_draws + live_draws
 
         lines = [
             "📈 TRENDS (Last 10 Games)",
             f"Results:   {result_glyphs}",
             f"Play/Draw: {play_draw_glyphs}",
+            _on_the_play_line(overall_plays, overall_draws),
         ]
-        if known_play_draw:
-            pct = round(100 * play_count / len(known_play_draw))
-            lines.append(f"On the Play: {pct}% ({play_count}/{len(known_play_draw)} known)")
-        else:
-            lines.append("On the Play: no data yet")
 
         return Static("\n".join(lines), classes="session-section")
 
     def _live_run_contribution(self):
-        """The current run's in-progress wins/losses/prize, to overlay on
-        top of the stored (completed-runs-only) session/all-time totals
-        for display. Doesn't mutate stats - the stored totals stay
-        completed-only until the run actually ends, so there's no
+        """The current run's in-progress wins/losses/prize/plays/draws, to
+        overlay on top of the stored (completed-runs-only) session/all-
+        time totals for display. Doesn't mutate stats - the stored totals
+        stay completed-only until the run actually ends, so there's no
         double-counting once it does. has_active_run is reported
         separately from wins/losses since a just-started run legitimately
         has 0-0 but should still show as "in progress"."""
         stats = self.app_data.event_stats
         run = stats.current_run
         if not run or run.status != EventRunStatus.ACTIVE:
-            return 0, 0, 0, 0, False
+            return 0, 0, 0, 0, 0, 0, False
         event = _get_event_for_stats(stats, self.event_catalog)
         if not event:
-            return 0, 0, 0, 0, False
+            return 0, 0, 0, 0, 0, 0, False
         prize = run.prize(event)
-        return run.wins, run.losses, prize.gems, prize.packs, True
+        return run.wins, run.losses, prize.gems, prize.packs, run.plays, run.draws, True
 
     def _create_session_section(self) -> Static:
         stats = self.app_data.event_stats
-        live_wins, live_losses, live_gems, live_packs, has_active_run = self._live_run_contribution()
+        live_wins, live_losses, live_gems, live_packs, live_plays, live_draws, has_active_run = (
+            self._live_run_contribution()
+        )
         wins = stats.session_wins + live_wins
         losses = stats.session_losses + live_losses
         gems = stats.session_gems + live_gems
         packs = stats.session_packs + live_packs
+        plays = stats.session_plays + live_plays
+        draws = stats.session_draws + live_draws
 
         runs_played = str(stats.session_runs_played)
         if has_active_run:
@@ -1194,6 +1214,7 @@ class EventStatsPanel(Static):
             f"Runs played: {runs_played}",
             f"Record: [{wins}W] - [{losses}L]{_win_pct(wins, losses)}",
             f"Prize: {gems} gems, {packs} packs",
+            _on_the_play_line(plays, draws),
         ]
         if stats.session_milestone_counts:
             counts_str = ", ".join(f"{k}: {v}" for k, v in stats.session_milestone_counts.items())
@@ -1202,11 +1223,15 @@ class EventStatsPanel(Static):
 
     def _create_alltime_section(self) -> Static:
         stats = self.app_data.event_stats
-        live_wins, live_losses, live_gems, live_packs, has_active_run = self._live_run_contribution()
+        live_wins, live_losses, live_gems, live_packs, live_plays, live_draws, has_active_run = (
+            self._live_run_contribution()
+        )
         wins = stats.alltime_wins + live_wins
         losses = stats.alltime_losses + live_losses
         gems = stats.alltime_gems + live_gems
         packs = stats.alltime_packs + live_packs
+        plays = stats.alltime_plays + live_plays
+        draws = stats.alltime_draws + live_draws
 
         runs_played = str(stats.alltime_runs_played)
         if has_active_run:
@@ -1217,6 +1242,7 @@ class EventStatsPanel(Static):
             f"Runs played: {runs_played}",
             f"Record: [{wins}W] - [{losses}L]{_win_pct(wins, losses)}",
             f"Prize: {gems} gems, {packs} packs",
+            _on_the_play_line(plays, draws),
         ]
         if stats.alltime_milestone_counts:
             counts_str = ", ".join(f"{k}: {v}" for k, v in stats.alltime_milestone_counts.items())

@@ -118,19 +118,34 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   actually see in a normal-height terminal. `_win_pct()` adds a
   "(55.6%)" suffix to the session/all-time Record lines, blank if no
   games have been completed yet (division by zero guard).
-- Session/All-Time Record, Prize, and "Runs played" include the current
-  in-progress run's live contribution, not just completed runs -
-  `EventStatsPanel._live_run_contribution()` computes it fresh on every
-  render (`run.wins`/`run.losses`/`run.prize(event)`) and adds it on top
-  of the stored `session_*`/`alltime_*` fields *for display only*; it
-  never mutates those fields, so there's no double-counting once the run
-  actually completes and `_complete_run()` folds it in for real. "Runs
-  played" gets a "(+1 in progress)" suffix whenever there's an active
-  run, driven by a separate `has_active_run` flag rather than "wins or
+- Session/All-Time Record, Prize, "Runs played", and Play/Draw % all
+  include the current in-progress run's live contribution, not just
+  completed runs - `EventStatsPanel._live_run_contribution()` computes
+  it fresh on every render (`run.wins`/`run.losses`/`run.prize(event)`/
+  `run.plays`/`run.draws`) and adds it on top of the stored
+  `session_*`/`alltime_*` fields *for display only*; it never mutates
+  those fields, so there's no double-counting once the run actually
+  completes and `_complete_run()` folds it in for real. "Runs played"
+  gets a "(+1 in progress)" suffix whenever there's an active run,
+  driven by a separate `has_active_run` flag rather than "wins or
   losses > 0" - a just-started 0-0 run is still in progress. Milestone
   counts are deliberately NOT given the same live treatment - they read
   as "confirmed achievements from completed runs," not a fluctuating
   number.
+- Play/draw is tracked at all three levels: `EventRun.plays`/`.draws`
+  (computed live from that run's own games, same pattern as `.wins`/
+  `.losses`) for "this run"; `EventStats.session_plays`/`.session_draws`
+  for the session; `EventStats.alltime_plays`/`.alltime_draws` for
+  all-time. The all-time pair are genuine running counters incremented
+  in `_complete_run()` - NOT derived from `recent_runs`, which is capped
+  to the last 5 completed runs and would silently under-count an
+  "overall" percentage once more runs than that have been played. The
+  Trends section's last-10 *glyph sequence* still legitimately uses the
+  capped `_all_event_games_chronological()` (that's supposed to be a
+  recent window), but its summary "On the Play %" line uses the
+  uncapped `alltime_plays`/`alltime_draws` + live run instead, for the
+  same reason the stats panel does. `_on_the_play_line()` is the shared
+  formatter for all three "On the Play: N% (X/Y known)" lines.
 - Six ranked-only actions (`toggle_mythic`, `set_season_start`,
   `edit_stats`, `hide_tiers`, `set_rank`, and `view_all_notes` — bound to
   M/T/E/H/S and Ctrl+N respectively) have no Event Mode behavior at all,

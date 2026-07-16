@@ -174,6 +174,42 @@ def test_event_stats_session_and_alltime_aggregation():
     assert stats.alltime_gems == 1600  # unchanged
 
 
+def test_event_stats_tracks_play_draw_cumulatively():
+    """Test that alltime_plays/alltime_draws are true running counters,
+    not derived from recent_runs (which is capped to the last 5
+    completed runs and would silently under-count an "overall"
+    percentage once more runs than that have been played)."""
+    event = load_test_event()
+    stats = EventStats()
+
+    for i in range(6):
+        run = EventRun(run_id=f"r{i}", event_id=event.event_id, entry_currency="Gems")
+        stats.start_run(run)
+        stats.record_game(EventGame(result=EventGameResult.LOSS, play_draw="Play"), event)
+        stats.record_game(EventGame(result=EventGameResult.LOSS, play_draw="Draw"), event)
+
+    # 6 completed runs, each 1 Play + 1 Draw, but recent_runs only keeps the last 5.
+    assert len(stats.recent_runs) == 5
+    assert stats.alltime_plays == 6
+    assert stats.alltime_draws == 6
+
+    # EventRun.plays/draws are computed live for an in-progress run.
+    run = EventRun(run_id="r_active", event_id=event.event_id, entry_currency="Gems")
+    stats.start_run(run)
+    stats.record_game(EventGame(result=EventGameResult.WIN, play_draw="Play"), event)
+    assert run.plays == 1
+    assert run.draws == 0
+
+    stats.restart_session()
+    assert stats.session_plays == 0
+    assert stats.session_draws == 0
+    assert stats.alltime_plays == 6  # unchanged
+
+    stats.wipe_alltime()
+    assert stats.alltime_plays == 0
+    assert stats.alltime_draws == 0
+
+
 def test_event_stats_restart_session_discards_active_run():
     """Test that restarting the session discards an in-progress run, rather
     than leaving its stale wins/losses displayed after the reset."""
@@ -392,6 +428,7 @@ def main():
     test_event_run_profit_when_paid_in_gold_uses_gems_price()
     test_event_run_profit_with_token_entry()
     test_event_stats_session_and_alltime_aggregation()
+    test_event_stats_tracks_play_draw_cumulatively()
     test_event_stats_restart_session_discards_active_run()
     test_event_stats_run_goal_wins_persists_across_restart()
     test_event_stats_wipe_alltime_clears_everything()
