@@ -118,6 +118,19 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   actually see in a normal-height terminal. `_win_pct()` adds a
   "(55.6%)" suffix to the session/all-time Record lines, blank if no
   games have been completed yet (division by zero guard).
+- Session/All-Time Record, Prize, and "Runs played" include the current
+  in-progress run's live contribution, not just completed runs -
+  `EventStatsPanel._live_run_contribution()` computes it fresh on every
+  render (`run.wins`/`run.losses`/`run.prize(event)`) and adds it on top
+  of the stored `session_*`/`alltime_*` fields *for display only*; it
+  never mutates those fields, so there's no double-counting once the run
+  actually completes and `_complete_run()` folds it in for real. "Runs
+  played" gets a "(+1 in progress)" suffix whenever there's an active
+  run, driven by a separate `has_active_run` flag rather than "wins or
+  losses > 0" - a just-started 0-0 run is still in progress. Milestone
+  counts are deliberately NOT given the same live treatment - they read
+  as "confirmed achievements from completed runs," not a fluctuating
+  number.
 - Six ranked-only actions (`toggle_mythic`, `set_season_start`,
   `edit_stats`, `hide_tiers`, `set_rank`, and `view_all_notes` — bound to
   M/T/E/H/S and Ctrl+N respectively) have no Event Mode behavior at all,

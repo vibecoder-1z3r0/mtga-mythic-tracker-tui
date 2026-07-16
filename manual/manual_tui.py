@@ -1159,19 +1159,42 @@ class EventStatsPanel(Static):
 
         return Static("\n".join(lines), classes="session-section")
 
+    def _live_run_contribution(self):
+        """The current run's in-progress wins/losses/prize, to overlay on
+        top of the stored (completed-runs-only) session/all-time totals
+        for display. Doesn't mutate stats - the stored totals stay
+        completed-only until the run actually ends, so there's no
+        double-counting once it does. has_active_run is reported
+        separately from wins/losses since a just-started run legitimately
+        has 0-0 but should still show as "in progress"."""
+        stats = self.app_data.event_stats
+        run = stats.current_run
+        if not run or run.status != EventRunStatus.ACTIVE:
+            return 0, 0, 0, 0, False
+        event = _get_event_for_stats(stats, self.event_catalog)
+        if not event:
+            return 0, 0, 0, 0, False
+        prize = run.prize(event)
+        return run.wins, run.losses, prize.gems, prize.packs, True
+
     def _create_session_section(self) -> Static:
         stats = self.app_data.event_stats
+        live_wins, live_losses, live_gems, live_packs, has_active_run = self._live_run_contribution()
+        wins = stats.session_wins + live_wins
+        losses = stats.session_losses + live_losses
+        gems = stats.session_gems + live_gems
+        packs = stats.session_packs + live_packs
+
+        runs_played = str(stats.session_runs_played)
+        if has_active_run:
+            runs_played += " (+1 in progress)"
+
         lines = [
             "📊 CURRENT SESSION",
+            f"Runs played: {runs_played}",
+            f"Record: [{wins}W] - [{losses}L]{_win_pct(wins, losses)}",
+            f"Prize: {gems} gems, {packs} packs",
         ]
-        lines.extend(
-            [
-                f"Runs played: {stats.session_runs_played}",
-                f"Record: [{stats.session_wins}W] - [{stats.session_losses}L]"
-                f"{_win_pct(stats.session_wins, stats.session_losses)}",
-                f"Prize: {stats.session_gems} gems, {stats.session_packs} packs",
-            ]
-        )
         if stats.session_milestone_counts:
             counts_str = ", ".join(f"{k}: {v}" for k, v in stats.session_milestone_counts.items())
             lines.append(f"Milestones: {counts_str}")
@@ -1179,12 +1202,21 @@ class EventStatsPanel(Static):
 
     def _create_alltime_section(self) -> Static:
         stats = self.app_data.event_stats
+        live_wins, live_losses, live_gems, live_packs, has_active_run = self._live_run_contribution()
+        wins = stats.alltime_wins + live_wins
+        losses = stats.alltime_losses + live_losses
+        gems = stats.alltime_gems + live_gems
+        packs = stats.alltime_packs + live_packs
+
+        runs_played = str(stats.alltime_runs_played)
+        if has_active_run:
+            runs_played += " (+1 in progress)"
+
         lines = [
             "🏆 ALL-TIME TOTAL",
-            f"Runs played: {stats.alltime_runs_played}",
-            f"Record: [{stats.alltime_wins}W] - [{stats.alltime_losses}L]"
-            f"{_win_pct(stats.alltime_wins, stats.alltime_losses)}",
-            f"Prize: {stats.alltime_gems} gems, {stats.alltime_packs} packs",
+            f"Runs played: {runs_played}",
+            f"Record: [{wins}W] - [{losses}L]{_win_pct(wins, losses)}",
+            f"Prize: {gems} gems, {packs} packs",
         ]
         if stats.alltime_milestone_counts:
             counts_str = ", ".join(f"{k}: {v}" for k, v in stats.alltime_milestone_counts.items())
