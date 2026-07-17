@@ -20,6 +20,10 @@ from models.event import (
 )
 from storage.state_manager import StateManager
 
+# manual_tui imports Textual (needed only for this one UI-logic test below,
+# _run_result_emoji - everything else in this file is model-layer only).
+from manual_tui import _run_result_emoji
+
 
 def load_test_event():
     """Load the Historic Pauper Challenge definition from the real catalog."""
@@ -109,6 +113,33 @@ def test_event_run_prize_and_profit():
     # 1200 gems + 8 packs * 200 gems/pack - 1000 entry = 1800
     assert run.net_profit_gems(event) == 1800
     assert run.highest_milestone(event).name == "Profit Run"
+
+
+def test_run_result_emoji_matches_real_prize_table():
+    """Test _run_result_emoji() against the actual Historic Pauper
+    Challenge prize table (win_cap=7, 1000 Gems entry) - this locks in
+    the exact win-count boundaries agreed after several rounds of
+    back-and-forth, since the money-bag ("free run") tier in particular
+    depends on real prize numbers (gems alone, packs excluded, first
+    reach the entry cost), not a fixed percentage of win_cap."""
+    event = load_test_event()
+    expected = {
+        0: "💀",
+        1: "😢",
+        2: "😐",
+        3: "😐",
+        4: "✅",
+        5: "💰",  # prize.gems == 1000 == entry cost: breakeven
+        6: "🔥",
+        7: "🏆",
+    }
+    for wins, emoji in expected.items():
+        run = EventRun(run_id=f"r{wins}", event_id=event.event_id, entry_currency="Gems")
+        for _ in range(wins):
+            run.add_game(EventGame(result=EventGameResult.WIN), event)
+        for _ in range(event.loss_cap if wins < event.win_cap else 0):
+            run.add_game(EventGame(result=EventGameResult.LOSS), event)
+        assert _run_result_emoji(run, event) == emoji, f"{wins} wins"
 
 
 def test_event_run_profit_when_paid_in_gold_uses_gems_price():
@@ -692,6 +723,7 @@ def main():
     test_event_game_records_play_draw_and_opponent_deck()
     test_event_run_completes_at_caps()
     test_event_run_prize_and_profit()
+    test_run_result_emoji_matches_real_prize_table()
     test_event_run_profit_when_paid_in_gold_uses_gems_price()
     test_event_run_profit_with_token_entry()
     test_event_stats_session_and_alltime_net_gems()

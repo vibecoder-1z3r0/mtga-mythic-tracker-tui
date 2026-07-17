@@ -65,6 +65,23 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   dropped its "Milestones: " label prefix too - just "Winning Run: 2,
   Free Run: 1, ..." now, since the label is implied by every other
   session-scoped line's context and it was pure clutter.
+- Trends grew a "Runs:" row: an emoji per completed run in the last-10
+  window (same most-recent-leftmost ordering as the games glyphs above
+  it), win count printed underneath each. `_run_result_emoji(run, event)`
+  is a result-quality ladder, evaluated best-to-worst so the single
+  highest-applicable tier wins on a boundary collision: 🏆 win_cap reached
+  (Trophy), 🔥 >=75% of win_cap, 💰 prize *gems alone* (packs deliberately
+  excluded - "you can't spend a pack on another entry") cover the entry
+  cost - a literal "this run paid for itself" breakeven, not tied to any
+  specific milestone name, ✅ >=50% of win_cap, 😐 >=25%, 😢 at least 1
+  win, 💀 0 wins. This went through several rounds of live back-and-forth
+  before landing (worth remembering the lesson: don't implement a
+  visual/design choice like this speculatively - confirm the exact
+  tiers/thresholds first, since guessing wrong here wasted a full
+  implement-revert cycle). Verified against the real Historic Pauper
+  Challenge prize table via a pilot test asserting the exact emoji at
+  every win count 0-7, since the 💰 threshold in particular depends on
+  the event's actual prize numbers, not a fixed percentage.
 - `EventStats` mirrors `SessionStats`'s session-vs-season split:
   `session_*` counters reset when you restart the event session (**R**
   in Event Mode), `alltime_*` counters never reset except via an explicit

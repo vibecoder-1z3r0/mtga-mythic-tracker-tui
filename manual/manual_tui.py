@@ -1001,6 +1001,38 @@ def _format_play_draw(play_draw: Optional[str]) -> str:
     return "Unknown"
 
 
+def _run_result_emoji(run: EventRun, event: EventDefinition) -> str:
+    """Result-quality emoji for a completed run, best to worst:
+    - trophy: reached win_cap
+    - fire: >=75% of win_cap
+    - money bag: prize *gems alone* (packs excluded - they can't be spent
+      on another entry) cover the entry cost, i.e. a genuine "free run"
+    - checkmark: >=50% of win_cap
+    - neutral: >=25% of win_cap
+    - crying: at least 1 win, below that
+    - skull: 0 wins
+    Checked in this order so the single best-applicable tier wins when
+    more than one condition is met (e.g. a breakeven run that's also
+    >=75% shows fire, not the money bag)."""
+    wins = run.wins
+    win_cap = event.win_cap
+    if wins <= 0 or win_cap <= 0:
+        return "💀"
+    if wins >= win_cap:
+        return "🏆"
+    ratio = wins / win_cap
+    if ratio >= 0.75:
+        return "🔥"
+    entry_gems = event.gems_equivalent_for(run.entry_currency)
+    if entry_gems is not None and run.prize(event).gems >= entry_gems:
+        return "💰"
+    if ratio >= 0.5:
+        return "✅"
+    if ratio >= 0.25:
+        return "😐"
+    return "😢"
+
+
 def _win_pct(wins: int, losses: int) -> str:
     """' (55.6%)' suffix for a W-L record, or '' if no games played yet."""
     total = wins + losses
@@ -1176,6 +1208,15 @@ class EventStatsPanel(Static):
             f"Results:   {result_glyphs}",
             f"Play/Draw: {play_draw_glyphs}",
         ]
+
+        event = _get_event_for_stats(stats, self.event_catalog)
+        if event and stats.recent_runs:
+            # Most recent run on the left, same ordering as the games above.
+            recent_runs = list(reversed(stats.recent_runs[-10:]))
+            emoji_row = "".join(_run_result_emoji(r, event) for r in recent_runs)
+            number_row = "".join(f"{r.wins:<2}" for r in recent_runs)
+            lines.append(f"Runs:      {emoji_row}")
+            lines.append(" " * len("Runs:      ") + number_row)
 
         return Static("\n".join(lines), classes="event-stat-section")
 
