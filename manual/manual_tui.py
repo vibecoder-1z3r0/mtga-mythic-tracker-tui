@@ -1001,6 +1001,14 @@ def _format_play_draw(play_draw: Optional[str]) -> str:
     return "Unknown"
 
 
+def _gradient_color(ratio: float) -> str:
+    """Rich rgb() color sliding from red (ratio 0) to green (ratio 1)."""
+    ratio = max(0.0, min(1.0, ratio))
+    red = round(255 * (1 - ratio))
+    green = round(255 * ratio)
+    return f"rgb({red},{green},0)"
+
+
 def _run_result_emoji(run: EventRun, event: EventDefinition) -> str:
     """Result-quality emoji for a completed run, best to worst:
     - trophy: reached win_cap
@@ -1203,20 +1211,25 @@ class EventStatsPanel(Static):
             for g in recent
         )
 
-        lines = [
-            "📈 TRENDS (Last 10 Games)",
-            f"Results:   {result_glyphs}",
-            f"Play/Draw: {play_draw_glyphs}",
-        ]
+        lines = ["📈 TRENDS"]
 
         event = _get_event_for_stats(stats, self.event_catalog)
         if event and stats.recent_runs:
-            # Most recent run on the left, same ordering as the games above.
+            # Most recent run on the left, same ordering as the games below.
+            # Win count colored on a straight red-to-green gradient by
+            # wins/win_cap. _run_result_emoji() (tiered trophy/fire/money
+            # bag/etc.) is disabled here in favor of this, but kept intact
+            # in case it comes back.
             recent_runs = list(reversed(stats.recent_runs[-10:]))
-            emoji_row = "".join(_run_result_emoji(r, event) for r in recent_runs)
-            number_row = "".join(f"{r.wins:<2}" for r in recent_runs)
-            lines.append(f"Runs:      {emoji_row}")
-            lines.append(" " * len("Runs:      ") + number_row)
+            number_row = " ".join(
+                f"[{_gradient_color(r.wins / event.win_cap)}]{r.wins}[/{_gradient_color(r.wins / event.win_cap)}]"
+                for r in recent_runs
+            )
+            lines.append(f"Runs:  {number_row}")
+            lines.append("")
+
+        lines.append(f"Games:     {result_glyphs}")
+        lines.append(f"Play/Draw: {play_draw_glyphs}")
 
         return Static("\n".join(lines), classes="event-stat-section")
 
