@@ -1225,7 +1225,7 @@ class EventStatsPanel(Static):
                 f"[{_gradient_color(r.wins / event.win_cap)}]{r.wins}[/{_gradient_color(r.wins / event.win_cap)}]"
                 for r in recent_runs
             )
-            lines.append(f"Runs:  {number_row}")
+            lines.append(f"Runs:      {number_row}")
             lines.append("")
 
         lines.append(f"Games:     {result_glyphs}")
