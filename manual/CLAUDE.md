@@ -43,6 +43,22 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   event can offer arbitrary entry methods; `EventRun.net_profit_gems()`
   resolves a gems-equivalent value per option (explicit override, own
   amount if Gems, else the event's own Gems option) for profit calc.
+- `net_profit_gems()` originally only counted prize *gems*, silently
+  ignoring prize *packs* entirely - a real gap once a user asked for a
+  "net gems" stat and pointed out packs need converting too (MTGA prices
+  a pack at 200 gems). `EventDefinition.pack_gems_value: int = 200` is
+  the configurable per-event conversion rate; `net_profit_gems()` now
+  adds `prize.packs * event.pack_gems_value` to the prize side before
+  subtracting entry cost. `EventStats.session_net_gems(event)`/
+  `alltime_net_gems(event)` sum each counted run's own
+  `net_profit_gems()` (not a naive "aggregate prize minus aggregate
+  entry," since each run's entry currency can differ) - `None` propagates
+  if any run's currency isn't gems-resolvable, same as the per-run
+  method. Displayed as a "Net Gems: +2150" line in the run panel (was
+  "Net profit: +150 gems", renamed for consistency) and in the Session/
+  All-Time sections, with the current in-progress run's own
+  `net_profit_gems()` live-overlaid on top the same way Record/Prize
+  already are.
 - `EventStats` mirrors `SessionStats`'s session-vs-season split:
   `session_*` counters reset when you restart the event session (**R**
   in Event Mode), `alltime_*` counters never reset except via an explicit

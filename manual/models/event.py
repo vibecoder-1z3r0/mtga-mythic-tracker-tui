@@ -59,6 +59,9 @@ class EventDefinition:
     milestones: List[MilestoneDefinition] = field(default_factory=list)
     start_date: Optional[str] = None
     end_date: Optional[str] = None
+    # Gems-equivalent value of one prize pack, for net-gems profit calc.
+    # 200 is MTGA's standard real-money-shop pack price in gems.
+    pack_gems_value: int = 200
 
     def get_entry_option(self, currency: str) -> Optional[EntryOption]:
         """Look up an entry option by currency name (case-insensitive)."""
@@ -217,14 +220,17 @@ class EventRun:
         return event.prize_for_wins(self.wins)
 
     def net_profit_gems(self, event: EventDefinition) -> Optional[int]:
-        """Net gems profit (prize gems minus entry cost, in gems-equivalent
-        terms). Non-gems entries (gold, tokens) are converted via
+        """Net gems profit: prize gems plus packs (converted to gems via
+        event.pack_gems_value) minus entry cost, all in gems-equivalent
+        terms. Non-gems entries (gold, tokens) are converted via
         event.gems_equivalent_for(). Returns None if not resolvable.
         """
         entry_cost_gems_equiv = event.gems_equivalent_for(self.entry_currency)
         if entry_cost_gems_equiv is None:
             return None
-        return round(self.prize(event).gems - entry_cost_gems_equiv)
+        prize = self.prize(event)
+        prize_gems_equiv = prize.gems + prize.packs * event.pack_gems_value
+        return round(prize_gems_equiv - entry_cost_gems_equiv)
 
     def highest_milestone(self, event: EventDefinition) -> Optional[MilestoneDefinition]:
         """The highest-threshold milestone this run has reached so far."""
@@ -325,6 +331,19 @@ class EventStats:
                 counts[milestone.name] = counts.get(milestone.name, 0) + 1
         return counts
 
+    def session_net_gems(self, event: EventDefinition) -> Optional[int]:
+        """Net gems profit across runs completed this session: each run's
+        own net_profit_gems() summed (prize gems + packs-as-gems minus
+        that run's own entry cost). None if any run's entry currency isn't
+        gems-resolvable."""
+        total = 0
+        for run in self._session_runs():
+            profit = run.net_profit_gems(event)
+            if profit is None:
+                return None
+            total += profit
+        return total
+
     def session_duration(self) -> timedelta:
         """Time since the current session began, excluding any paused time
         (mirrors ranked SessionStats.get_active_session_duration())."""
@@ -385,6 +404,19 @@ class EventStats:
             for milestone in event.milestones_met(run.wins):
                 counts[milestone.name] = counts.get(milestone.name, 0) + 1
         return counts
+
+    def alltime_net_gems(self, event: EventDefinition) -> Optional[int]:
+        """Net gems profit across every completed run: each run's own
+        net_profit_gems() summed (prize gems + packs-as-gems minus that
+        run's own entry cost). None if any run's entry currency isn't
+        gems-resolvable."""
+        total = 0
+        for run in self.recent_runs:
+            profit = run.net_profit_gems(event)
+            if profit is None:
+                return None
+            total += profit
+        return total
 
     def start_run(self, run: EventRun) -> None:
         """Start a new run, replacing any existing (presumably ended) one."""

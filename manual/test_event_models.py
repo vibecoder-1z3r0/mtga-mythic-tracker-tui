@@ -106,7 +106,8 @@ def test_event_run_prize_and_profit():
 
     assert run.prize(event).gems == 1200
     assert run.prize(event).packs == 8
-    assert run.net_profit_gems(event) == 200  # 1200 - 1000 entry
+    # 1200 gems + 8 packs * 200 gems/pack - 1000 entry = 1800
+    assert run.net_profit_gems(event) == 1800
     assert run.highest_milestone(event).name == "Profit Run"
 
 
@@ -119,7 +120,8 @@ def test_event_run_profit_when_paid_in_gold_uses_gems_price():
         run.add_game(EventGame(result=EventGameResult.WIN), event)
     # Falls back to the event's Gems entry option (1000) as no explicit
     # gems_equivalent was set on the Gold option.
-    assert run.net_profit_gems(event) == 500
+    # 1500 gems + 10 packs * 200 gems/pack - 1000 entry = 2500
+    assert run.net_profit_gems(event) == 2500
 
 
 def test_event_run_profit_with_token_entry():
@@ -137,7 +139,52 @@ def test_event_run_profit_with_token_entry():
 
     assert run.wins == 3
     assert run.prize(event).gems == 500
-    assert run.net_profit_gems(event) == -500
+    # 500 gems + 2 packs * 200 gems/pack - 1000 entry = -100
+    assert run.net_profit_gems(event) == -100
+
+
+def test_event_stats_session_and_alltime_net_gems():
+    """Test session_net_gems()/alltime_net_gems(): sum of each run's own
+    net_profit_gems() (prize gems + packs-as-gems minus that run's entry
+    cost). Motivated by a real user report: with N finished runs at a
+    fixed gems entry cost each, and packs converted to gems at
+    event.pack_gems_value (200, MTGA's real pack price), net gems should
+    equal total prize gems + total prize packs * 200 - total entry spent."""
+    event = load_test_event()
+    stats = EventStats()
+
+    win_counts = [0, 0, 1, 1, 2, 2, 3, 4, 5, 7]
+    expected_gems = 0
+    expected_packs = 0
+    for wins in win_counts:
+        run = EventRun(run_id=f"r{wins}", event_id=event.event_id, entry_currency="Gems")
+        stats.start_run(run)
+        for _ in range(wins):
+            stats.record_game(EventGame(result=EventGameResult.WIN), event)
+        # Finish the run off with losses if it didn't already hit win_cap.
+        while stats.current_run.status != EventRunStatus.ENDED:
+            stats.record_game(EventGame(result=EventGameResult.LOSS), event)
+        prize = run.prize(event)
+        expected_gems += prize.gems
+        expected_packs += prize.packs
+
+    assert len(stats.recent_runs) == len(win_counts)
+    assert stats.alltime_prize(event).gems == expected_gems
+    assert stats.alltime_prize(event).packs == expected_packs
+
+    entry_spent = len(win_counts) * 1000  # every run entered with 1000 Gems
+    expected_net = expected_gems + expected_packs * event.pack_gems_value - entry_spent
+    assert stats.alltime_net_gems(event) == expected_net
+
+    # All runs are still within the only-ever session, so session and
+    # all-time net gems must match exactly.
+    assert stats.session_net_gems(event) == stats.alltime_net_gems(event) == expected_net
+
+    # After restarting the session, session_net_gems reads 0 (nothing
+    # completed since the new marker) while all-time is untouched.
+    stats.restart_session()
+    assert stats.session_net_gems(event) == 0
+    assert stats.alltime_net_gems(event) == expected_net
 
 
 def test_event_stats_session_and_alltime_aggregation():
@@ -647,6 +694,7 @@ def main():
     test_event_run_prize_and_profit()
     test_event_run_profit_when_paid_in_gold_uses_gems_price()
     test_event_run_profit_with_token_entry()
+    test_event_stats_session_and_alltime_net_gems()
     test_event_stats_session_and_alltime_aggregation()
     test_event_stats_tracks_play_draw_cumulatively()
     test_event_stats_restart_session_discards_active_run()
