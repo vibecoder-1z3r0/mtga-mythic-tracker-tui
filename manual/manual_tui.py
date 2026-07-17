@@ -1212,10 +1212,11 @@ class EventStatsPanel(Static):
 
         started = stats.session_start_time.strftime("%I:%M %p").lstrip("0")
         duration = _format_duration(stats.session_duration())
+        pause_status = " ⏸️ PAUSED" if stats.session_paused else ""
 
         lines = [
             "📊 CURRENT SESSION",
-            f"Started: {started}  Duration: {duration}",
+            f"Started: {started}  Duration: {duration}{pause_status}",
             f"Runs played: {runs_played}",
             f"Record: [{wins}W] - [{losses}L]{_win_pct(wins, losses)}",
             f"Prize: {gems} gems, {packs} packs",
@@ -3961,8 +3962,8 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
 
     def action_pause_resume_session(self) -> None:
         """Pause or resume the session timer."""
-        stats = self.app_data.stats
-        
+        stats = self.app_data.event_stats if self.app_data.view_mode == "event" else self.app_data.stats
+
         if stats.session_paused:
             # Resume the session
             stats.resume_session()
@@ -3974,7 +3975,7 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
                 self.notify("Session timer paused", severity="info")
             else:
                 self.notify("No active session to pause", severity="warning")
-        
+
         self.refresh_panels()
     
     def _check_milestones(self, new_rank: ManualRank, old_rank: ManualRank) -> None:

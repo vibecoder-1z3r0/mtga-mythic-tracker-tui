@@ -266,6 +266,9 @@ class EventStats:
     # (first ever run, or reconstructed from a save that predates this
     # field) both just work without special-casing.
     session_start_time: datetime = field(default_factory=datetime.now)
+    session_paused: bool = False
+    pause_start_time: Optional[datetime] = None
+    total_paused_time: float = 0.0  # seconds, accumulated across all pauses this session
 
     # Every completed run ever played, in completion order. Both session
     # and all-time totals are computed from this rather than stored as
@@ -323,10 +326,28 @@ class EventStats:
         return counts
 
     def session_duration(self) -> timedelta:
-        """Wall-clock time since the current session began. No pause/resume
-        concept here (unlike ranked mode) - event runs are discrete
-        win/loss-capped attempts, not a continuous game clock."""
-        return datetime.now() - self.session_start_time
+        """Time since the current session began, excluding any paused time
+        (mirrors ranked SessionStats.get_active_session_duration())."""
+        elapsed = (datetime.now() - self.session_start_time).total_seconds()
+        current_pause = 0.0
+        if self.session_paused and self.pause_start_time:
+            current_pause = (datetime.now() - self.pause_start_time).total_seconds()
+        active = elapsed - self.total_paused_time - current_pause
+        return timedelta(seconds=max(0, active))
+
+    def pause_session(self) -> None:
+        """Pause the session timer."""
+        if not self.session_paused:
+            self.session_paused = True
+            self.pause_start_time = datetime.now()
+
+    def resume_session(self) -> None:
+        """Resume the session timer, folding the just-finished pause into
+        total_paused_time so session_duration() keeps excluding it."""
+        if self.session_paused and self.pause_start_time:
+            self.total_paused_time += (datetime.now() - self.pause_start_time).total_seconds()
+            self.session_paused = False
+            self.pause_start_time = None
 
     @property
     def alltime_runs_played(self) -> int:
@@ -406,6 +427,9 @@ class EventStats:
         self.current_run = None
         self.session_start_run_count = len(self.recent_runs)
         self.session_start_time = datetime.now()
+        self.session_paused = False
+        self.pause_start_time = None
+        self.total_paused_time = 0.0
 
     def wipe_alltime(self) -> None:
         """Wipe all-time totals permanently. Also discards any in-progress
@@ -415,4 +439,7 @@ class EventStats:
         self.recent_runs = []
         self.session_start_run_count = 0
         self.session_start_time = datetime.now()
+        self.session_paused = False
+        self.pause_start_time = None
+        self.total_paused_time = 0.0
         self.run_goal_wins = None

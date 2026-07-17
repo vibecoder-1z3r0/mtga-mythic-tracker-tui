@@ -250,15 +250,13 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   Added the same concept to `EventStats`: `session_start_time: datetime`
   (`field(default_factory=datetime.now)`, so a brand-new EventStats - or
   one reconstructed from a save that predates this field - just works
-  without a separate default-state code path) and `session_duration()`
-  (plain wall-clock `datetime.now() - session_start_time`, no pause/
-  resume - event runs are discrete win/loss-capped attempts, not a
-  continuous game clock like ranked's). Reset in both `restart_session()`
-  and `wipe_alltime()`, same as `session_start_run_count`. Displayed as a
-  "Started: 1:32 AM  Duration: 2m 15s" line at the top of the Session
-  section (`_format_duration()` is the shared H/M/S formatter, dropping
-  leading zero units). Ticks live: `EventStatsPanel._generate_session_content()`
-  was split out from `_create_session_section()` (mirrors ranked's
+  without a separate default-state code path) and `session_duration()`.
+  Reset in both `restart_session()` and `wipe_alltime()`, same as
+  `session_start_run_count`. Displayed as a "Started: 1:32 AM  Duration:
+  2m 15s" line at the top of the Session section (`_format_duration()` is
+  the shared H/M/S formatter, dropping leading zero units). Ticks live:
+  `EventStatsPanel._generate_session_content()` was split out from
+  `_create_session_section()` (mirrors ranked's
   `_generate_session_content()`/`refresh_session_section()` split) so the
   app's existing 1-second `set_interval` timer tick can re-render just
   that one `Static` (`id="event-session-section"`) without rebuilding the
@@ -266,6 +264,26 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   return immediately for event mode entirely (StatsPanel isn't mounted
   there); it now calls `EventStatsPanel.refresh_session_section()`
   instead of returning early.
+- **P (pause/resume) didn't actually pause the event session timer** -
+  first-pass `session_duration()` was a plain `datetime.now() -
+  session_start_time` with "no pause/resume, unlike ranked mode" called
+  out explicitly, but `action_pause_resume_session()` was never made
+  context-sensitive to begin with: it unconditionally operated on
+  `self.app_data.stats` (ranked's `SessionStats`), so in Event Mode
+  pressing P silently paused/resumed the *unused* ranked timer while the
+  event session timer kept running untouched - and P wasn't in
+  `RANKED_ONLY_ACTIONS` either, so nothing hid it or hinted it didn't
+  apply. Fixed both ends: `EventStats` gained `session_paused`/
+  `pause_start_time`/`total_paused_time` and `pause_session()`/
+  `resume_session()`, mirroring ranked's fields/methods exactly, and
+  `session_duration()` now subtracts `total_paused_time` (plus any
+  still-in-progress pause) from the elapsed wall-clock time, same
+  formula as `SessionStats.get_active_session_duration()`. All three
+  pause fields reset in `restart_session()`/`wipe_alltime()`, alongside
+  `session_start_time`. `action_pause_resume_session()` now picks
+  `event_stats` vs `stats` based on `view_mode` before calling
+  pause/resume. Session section shows " ⏸️ PAUSED" appended to the
+  Duration line when paused, matching ranked's `pause_status` suffix.
 - Six ranked-only actions (`toggle_mythic`, `set_season_start`,
   `edit_stats`, `hide_tiers`, `set_rank`, and `view_all_notes` — bound to
   M/T/E/H/S and Ctrl+N respectively) have no Event Mode behavior at all,

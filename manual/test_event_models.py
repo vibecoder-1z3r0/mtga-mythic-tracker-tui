@@ -5,7 +5,7 @@ EventRun, EventStats) and StateManager persistence round-trip.
 """
 import json
 import tempfile
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from models.event import (
@@ -253,6 +253,47 @@ def test_event_stats_session_start_time_resets_on_restart_and_wipe():
     stats.wipe_alltime()
     assert stats.session_start_time > before_wipe
     assert stats.session_duration().total_seconds() < 1
+
+
+def test_event_stats_pause_resume_excludes_paused_time_from_duration():
+    """Test that pause_session()/resume_session() work like ranked mode's
+    equivalent: pausing freezes session_duration() in place, and resuming
+    subtracts the paused interval from all future duration readings
+    rather than including it."""
+    stats = EventStats()
+    stats.session_start_time = datetime.now() - timedelta(seconds=10)
+    assert not stats.session_paused
+
+    stats.pause_session()
+    assert stats.session_paused
+    assert stats.pause_start_time is not None
+
+    # Backdate the pause start to simulate 5 real seconds having passed
+    # while paused, without needing an actual sleep() in the test.
+    stats.pause_start_time = datetime.now() - timedelta(seconds=5)
+    duration_while_paused = stats.session_duration()
+    # ~5s elapsed (10s total - 5s currently-paused), regardless of how
+    # long this assertion takes to run, since pause freezes the clock.
+    assert 4 <= duration_while_paused.total_seconds() <= 6
+
+    # Calling session_duration() again immediately shouldn't have moved,
+    # confirming it's truly frozen rather than just coincidentally equal.
+    assert stats.session_duration() == duration_while_paused
+
+    stats.resume_session()
+    assert not stats.session_paused
+    assert stats.pause_start_time is None
+    assert stats.total_paused_time >= 5
+
+    # After resuming, duration should still read ~5s (10s wall-clock minus
+    # the ~5s that was paused), not the full ~10s.
+    duration_after_resume = stats.session_duration()
+    assert 4 <= duration_after_resume.total_seconds() <= 6
+
+    # A no-op pause/resume on an already-paused/already-running stats
+    # object shouldn't do anything destructive.
+    stats.resume_session()  # already resumed - no-op
+    assert stats.total_paused_time >= 5
 
 
 def test_event_stats_run_goal_wins_persists_across_restart():
@@ -608,6 +649,7 @@ def main():
     test_event_stats_tracks_play_draw_cumulatively()
     test_event_stats_restart_session_discards_active_run()
     test_event_stats_session_start_time_resets_on_restart_and_wipe()
+    test_event_stats_pause_resume_excludes_paused_time_from_duration()
     test_event_stats_run_goal_wins_persists_across_restart()
     test_event_stats_wipe_alltime_clears_everything()
     test_event_stats_rejects_game_with_no_active_run()
