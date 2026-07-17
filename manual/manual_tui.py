@@ -1221,7 +1221,7 @@ class EventStatsPanel(Static):
             # bag/etc.) is disabled here in favor of this, but kept intact
             # in case it comes back.
             recent_runs = list(reversed(stats.recent_runs[-10:]))
-            number_row = " ".join(
+            number_row = "".join(
                 f"[{_gradient_color(r.wins / event.win_cap)}]{r.wins}[/{_gradient_color(r.wins / event.win_cap)}]"
                 for r in recent_runs
             )
