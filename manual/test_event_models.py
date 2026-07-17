@@ -276,9 +276,11 @@ def test_event_stats_pause_resume_excludes_paused_time_from_duration():
     # long this assertion takes to run, since pause freezes the clock.
     assert 4 <= duration_while_paused.total_seconds() <= 6
 
-    # Calling session_duration() again immediately shouldn't have moved,
+    # Calling session_duration() again immediately shouldn't have moved
+    # (beyond sub-millisecond float rounding from the two now() calls),
     # confirming it's truly frozen rather than just coincidentally equal.
-    assert stats.session_duration() == duration_while_paused
+    redelta = abs((stats.session_duration() - duration_while_paused).total_seconds())
+    assert redelta < 0.01
 
     stats.resume_session()
     assert not stats.session_paused

@@ -3,3 +3,9 @@ line-length = 100
 extend-exclude = '''
 /manual/
 '''
+
+[tool.pytest.ini_options]
+# Test files live in tests/ but import repo-root modules (src.*, main_tui,
+# etc.) via absolute imports - this puts the repo root on sys.path
+# regardless of where pytest is invoked from or which test file is running.
+pythonpath = ["."]

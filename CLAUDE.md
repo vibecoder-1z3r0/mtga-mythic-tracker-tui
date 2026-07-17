@@ -112,28 +112,35 @@ source ~/.venv-tui/bin/activate && python3 main_tui.py --log-path ~/Player.log -
 ```
 
 ### Testing
+Test files live in `tests/` but import repo-root modules (`src.*`,
+`main_tui`, etc.) via absolute imports, so run them either as a module
+(`python3 -m tests.test_x`, from the repo root) or through pytest -
+`python3 tests/test_x.py` directly will fail with `ModuleNotFoundError`
+since Python puts the script's own directory on `sys.path`, not the repo
+root. `pyproject.toml`'s `[tool.pytest.ini_options] pythonpath = ["."]`
+handles this automatically for pytest.
 ```bash
 # Test core models (rank system, game tracking)
-source ~/.venv-tui/bin/activate && python3 test_models.py
+source ~/.venv-tui/bin/activate && python3 -m tests.test_models
 
 # Test configuration system
-source ~/.venv-tui/bin/activate && python3 test_config.py
+source ~/.venv-tui/bin/activate && python3 -m tests.test_config
 
 # Test state management and sessions
-source ~/.venv-tui/bin/activate && python3 test_state.py
+source ~/.venv-tui/bin/activate && python3 -m tests.test_state
 
 # Test MTGA log parser (mock data)
-source ~/.venv-tui/bin/activate && python3 test_parser.py
+source ~/.venv-tui/bin/activate && python3 -m tests.test_parser
 
 # Test data persistence layer
-source ~/.venv-tui/bin/activate && python3 test_data.py
+source ~/.venv-tui/bin/activate && python3 -m tests.test_data
 
 # Test event mode (EventDefinition/EventRun/EventSession, state/data managers)
-source ~/.venv-tui/bin/activate && python3 test_event_models.py
+source ~/.venv-tui/bin/activate && python3 -m tests.test_event_models
 
 # Or run the whole suite through pytest (used in CI)
 source ~/.venv-tui/bin/activate && pip install -r requirements-dev.txt
-pytest test_models.py test_config.py test_state.py test_parser.py test_data.py test_event_models.py -v
+pytest tests/test_models.py tests/test_config.py tests/test_state.py tests/test_parser.py tests/test_data.py tests/test_event_models.py -v
 ```
 
 ### Linting & Formatting
@@ -155,17 +162,20 @@ GitHub Actions (`.github/workflows/ci.yml`) runs `black --check`, `flake8`,
 and the pytest suite on every push and pull request against `main`.
 
 ### Visual Regression (SVG Snapshots)
-`test_snapshots.py` uses `pytest-textual-snapshot` to render `main_tui.py`
-(both the ranked screen and the event-mode screen) to SVG and compare
-against committed "golden" files in `__snapshots__/test_snapshots/`. This
-is what would have caught the "did you change the colorization?" question
-automatically — any layout, text, or color change fails CI.
+`tests/test_snapshots.py` uses `pytest-textual-snapshot` to render
+`main_tui.py` (both the ranked screen and the event-mode screen) to SVG
+and compare against committed "golden" files in
+`tests/__snapshots__/test_snapshots/` (syrupy's standard convention -
+the `__snapshots__` directory name is a hardcoded library constant, not
+configurable). This is what would have caught the "did you change the
+colorization?" question automatically — any layout, text, or color
+change fails CI.
 ```bash
 # Run snapshot checks (same as CI)
-pytest test_snapshots.py -v
+pytest tests/test_snapshots.py -v
 
 # After an intentional visual change, regenerate and commit the new goldens
-pytest test_snapshots.py --snapshot-update
+pytest tests/test_snapshots.py --snapshot-update
 ```
 On a mismatch, CI uploads `snapshot_report.html` as a downloadable
 workflow artifact showing an old/new/diff view.
@@ -211,12 +221,16 @@ mythic-tracker-tui/
 ├── events.json           # Hand-edited event catalog (Historic Pauper Challenge, etc.)
 ├── textual_log_viewer.py # Enhanced log browser with statistics
 ├── mtga-test-logs/      # Real MTGA log files for testing
-├── test_*.py            # Test files for each component
+├── tests/
+│   ├── test_*.py        # Test files for each component - run via `python3 -m tests.test_x`
+│   │                    # or pytest (both need repo root importable; direct
+│   │                    # `python3 tests/test_x.py` execution won't find src.*)
+│   └── __snapshots__/   # Committed golden SVGs for visual regression tests
 ├── configure_log_path.py # MTGA log path configuration
 ├── analyze_*.py         # Log analysis tools
 ├── requirements.txt     # Runtime Python dependencies
 ├── requirements-dev.txt # + pytest, black, flake8
-├── pyproject.toml       # black config
+├── pyproject.toml       # black config + pytest pythonpath
 ├── .flake8              # flake8 config
 └── CLAUDE.md            # This documentation
 ```
@@ -394,6 +408,7 @@ The core TUI application is fully functional and ready for daily use by MTG Aren
 | 2025-08-13 | 1h 15min | Advanced Timer Systems, Milestone Celebrations, Dual Time Tracking | ✅ Game timer, pause/resume, milestone toasts, dual time tracking, error fixes |
 | 2026-07-13 | TBD | Docs Cleanup, Test Suite Hardening (real assertions), Parser Bug Fixes, black/flake8, GitHub Actions CI, Event Mode (Historic Pauper Challenge), Ranked Session Bug Fixes | ✅ Removed stale prompt-logging instructions; converted print-only test scripts into real pytest tests; fixed a real event-type corruption bug in the log parser; added lint tooling and CI; added a parallel event/run tracking system (win/loss-capped runs, prize tables, milestones, profit calc) with its own models, state/data managers, and a new TUI screen, verified end-to-end via Textual's headless pilot harness; fixed main_tui.py's ranked Start/Pause/End Session flow, which never matched the real Session/StateManager/AppState APIs (wrong constructor args, wrong method signatures, `current_session` vs `active_session`, and an `AppState.has_active_session()` misuse that broke pause/resume) |
 | 2026-07-14 | TBD | Event Mode ported to manual_tui.py, SVG snapshot CI, Entry-Cost Redesign | ✅ Ported the event tracker to the standalone `manual/manual_tui.py` app (dataclass mirror of `src/models/event.py`, own `events.json`, `EventRunPanel`/`EventStatsPanel`, V/U keybindings); fixed a `gold1` color-name bug that silently failed to render gold pips in both apps (switched to explicit `rgb(255,215,0)`); added `pytest-textual-snapshot` SVG regression tests to CI for both the ranked and event screens; redesigned entry cost from fixed `entry_cost_gold`/`entry_cost_gems` fields into an open-ended `entry_options` array (`EntryOption`) so events can charge gold, gems, or arbitrary tokens (draft/Jumpstart), with a gems-equivalent fallback chain for net-profit calc — migrated both `events.json` catalogs, both `main_tui.py`/`manual_tui.py` UIs, and both test suites (plus a new token-entry test) to match |
+| 2026-07-17 | TBD | Event Mode bug fixes (manual_tui.py), session timer + pause, root test suite moved to tests/ | ✅ Fixed several manual_tui.py Event Mode bugs: an all-time/session play-draw calc discrepancy traced back to an unprompted 5-run cap on completed-run history (removed - all-time and session totals are now computed live from the full history instead of separately-maintained counters); a top-bar entry-cost display that clipped instead of wrapping (fixed via column-width reallocation, not a taller top bar); "P" not pausing the event session timer (it was hardcoded to the ranked SessionStats object, ignoring view_mode). Added a live session timer with pause/resume to Event Mode, mirroring ranked mode's existing one. Restructured the root project's tests: all `test_*.py` files and the SVG snapshot goldens moved from repo root into `tests/`/`tests/__snapshots__/`, with `pyproject.toml`'s `pythonpath = ["."]` keeping the `src.*`/`main_tui` absolute imports working regardless of invocation location (`manual/`'s separate test suite is untouched, per its own standalone-project design) |
 
 ### Session Metrics
 - **Total Development Time**: 5h 52min+
