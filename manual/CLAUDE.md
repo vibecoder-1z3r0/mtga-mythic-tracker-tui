@@ -54,11 +54,14 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   `net_profit_gems()` (not a naive "aggregate prize minus aggregate
   entry," since each run's entry currency can differ) - `None` propagates
   if any run's currency isn't gems-resolvable, same as the per-run
-  method. Displayed as a "Net Gems: +2150" line in the run panel (was
-  "Net profit: +150 gems", renamed for consistency) and in the Session/
-  All-Time sections, with the current in-progress run's own
-  `net_profit_gems()` live-overlaid on top the same way Record/Prize
-  already are.
+  method. `_prize_line()` folds the prize total and net gems into a
+  single line - "Prize(s): 2,050 gems, 11 packs (+250)" - in the run
+  panel (was two separate lines, "Prize so far: ..." and "Net profit:
+  ... gems") and in the Session/All-Time sections (was "Prize: ..." and
+  "Net Gems: ..." on two lines), with the current in-progress run's own
+  `net_profit_gems()` live-overlaid on top the same way the rest of
+  Record/Prize already are. Gems/packs/net-gems values use `{:,}`
+  thousands separators.
 - `EventStats` mirrors `SessionStats`'s session-vs-season split:
   `session_*` counters reset when you restart the event session (**R**
   in Event Mode), `alltime_*` counters never reset except via an explicit

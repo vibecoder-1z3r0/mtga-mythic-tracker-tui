@@ -1009,15 +1009,14 @@ def _win_pct(wins: int, losses: int) -> str:
     return f" ({100 * wins / total:.1f}%)"
 
 
-def _net_gems_line(total: Optional[int]) -> str:
-    """'Net Gems: +2150' line - prize gems plus packs (converted to gems)
-    minus entry cost, across every run counted. None (e.g. an entry
-    currency with no resolvable gems value anywhere in the history) shows
-    a placeholder instead of a wrong number."""
-    if total is None:
-        return "Net Gems: unknown (unresolvable entry currency)"
-    sign = "+" if total >= 0 else ""
-    return f"Net Gems: {sign}{total}"
+def _prize_line(gems: int, packs: int, net_gems: Optional[int]) -> str:
+    """'Prize(s): 2,050 gems, 11 packs (+250)' - prize totals plus the net
+    gems profit (prize gems + packs-as-gems minus entry cost) folded into
+    the same line. net_gems=None (e.g. an entry currency with no
+    resolvable gems value anywhere in the history) shows a placeholder
+    instead of a wrong number."""
+    net_str = "net gems unknown" if net_gems is None else f"{net_gems:+,}"
+    return f"Prize(s): {gems:,} gems, {packs:,} packs ({net_str})"
 
 
 def _format_duration(duration: timedelta) -> str:
@@ -1123,12 +1122,8 @@ class EventRunPanel(Static):
             lines.append(f"This run - {_on_the_play_line(run.plays, run.draws)}")
 
         prize = run.prize(event)
-        lines.append(f"Prize so far: {prize.gems} gems, {prize.packs} packs")
-
         profit = run.net_profit_gems(event)
-        if profit is not None:
-            sign = "+" if profit >= 0 else ""
-            lines.append(f"Net Gems: {sign}{profit}")
+        lines.append(_prize_line(prize.gems, prize.packs, profit))
 
         milestone = run.highest_milestone(event)
         lines.append(f"Milestone: {milestone.name if milestone else 'None yet'}")
@@ -1235,8 +1230,7 @@ class EventStatsPanel(Static):
             f"Started: {started}  Duration: {duration}{pause_status}",
             f"Runs played: {runs_played}",
             f"Record: [{wins}W] - [{losses}L]{_win_pct(wins, losses)}",
-            f"Prize: {gems} gems, {packs} packs",
-            _net_gems_line(net_gems),
+            _prize_line(gems, packs, net_gems),
             _on_the_play_line(plays, draws),
         ]
         milestone_counts = stats.session_milestone_counts(event) if event else {}
@@ -1288,8 +1282,7 @@ class EventStatsPanel(Static):
             "🏆 ALL-TIME TOTAL",
             f"Runs played: {runs_played}",
             f"Record: [{wins}W] - [{losses}L]{_win_pct(wins, losses)}",
-            f"Prize: {gems} gems, {packs} packs",
-            _net_gems_line(net_gems),
+            _prize_line(gems, packs, net_gems),
             _on_the_play_line(plays, draws),
         ]
         milestone_counts = stats.alltime_milestone_counts(event) if event else {}
