@@ -1009,6 +1009,19 @@ def _win_pct(wins: int, losses: int) -> str:
     return f" ({100 * wins / total:.1f}%)"
 
 
+def _format_duration(duration: timedelta) -> str:
+    """'1h 23m 45s' style duration string, dropping leading zero units."""
+    total_seconds = max(0, int(duration.total_seconds()))
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    seconds = total_seconds % 60
+    if hours > 0:
+        return f"{hours}h {minutes:02d}m {seconds:02d}s"
+    if minutes > 0:
+        return f"{minutes}m {seconds:02d}s"
+    return f"{seconds}s"
+
+
 def _on_the_play_line(plays: int, draws: int) -> str:
     """'On the Play: N/M (Z%)' line, or a placeholder if nothing's known
     yet. Denominator is only games with a *known* play/draw value -
@@ -1178,7 +1191,7 @@ class EventStatsPanel(Static):
         prize = run.prize(event)
         return run.wins, run.losses, prize.gems, prize.packs, run.plays, run.draws, True
 
-    def _create_session_section(self) -> Static:
+    def _generate_session_content(self) -> str:
         stats = self.app_data.event_stats
         live_wins, live_losses, live_gems, live_packs, live_plays, live_draws, has_active_run = (
             self._live_run_contribution()
@@ -1197,8 +1210,12 @@ class EventStatsPanel(Static):
         plays = stats.session_plays + live_plays
         draws = stats.session_draws + live_draws
 
+        started = stats.session_start_time.strftime("%I:%M %p").lstrip("0")
+        duration = _format_duration(stats.session_duration())
+
         lines = [
             "📊 CURRENT SESSION",
+            f"Started: {started}  Duration: {duration}",
             f"Runs played: {runs_played}",
             f"Record: [{wins}W] - [{losses}L]{_win_pct(wins, losses)}",
             f"Prize: {gems} gems, {packs} packs",
@@ -1208,7 +1225,22 @@ class EventStatsPanel(Static):
         if milestone_counts:
             counts_str = ", ".join(f"{k}: {v}" for k, v in milestone_counts.items())
             lines.append(f"Milestones: {counts_str}")
-        return Static("\n".join(lines), classes="event-stat-section")
+        return "\n".join(lines)
+
+    def _create_session_section(self) -> Static:
+        return Static(
+            self._generate_session_content(), classes="event-stat-section", id="event-session-section"
+        )
+
+    def refresh_session_section(self) -> None:
+        """Refresh just the session section's text (called every second by
+        the app's timer tick), so the Duration line stays live without
+        rebuilding the whole stats panel."""
+        try:
+            session_section = self.query_one("#event-session-section", Static)
+            session_section.update(self._generate_session_content())
+        except Exception:
+            pass  # Ignore if section not found (e.g. mid-teardown)
 
     def _create_alltime_section(self) -> Static:
         stats = self.app_data.event_stats
@@ -2943,9 +2975,13 @@ class ManualTUIApp(App):
         width: 50%;
         height: 100%;
         border: solid $primary;
-        margin: 1;
+        margin: 0 1;
         padding: 1;
         overflow-y: auto;
+    }
+
+    .left-panel {
+        padding: 1 1 1 0;
     }
     
     .footer-controls {
@@ -3224,7 +3260,14 @@ class ManualTUIApp(App):
     def _update_session_timers(self) -> None:
         """Update session duration and last result timers."""
         if self.app_data.view_mode == "event":
-            # StatsPanel isn't mounted in event view mode (EventStatsPanel is).
+            # StatsPanel isn't mounted in event view mode - EventStatsPanel
+            # is, and has its own refresh_session_section() for the
+            # session Duration line.
+            try:
+                event_stats_panel = self.query_one(EventStatsPanel)
+                event_stats_panel.refresh_session_section()
+            except Exception as e:
+                self.notify(f"Event session timer error: {e}", severity="error")
             return
         try:
             # Find stats panel and tell it to refresh its session section

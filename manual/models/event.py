@@ -8,7 +8,7 @@ exists in the parent project's src/models/event.py. Kept independent
 """
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -260,6 +260,13 @@ class EventStats:
     # since EventRun.wins is computed live from that run's own games.
     run_goal_wins: Optional[int] = None
 
+    # When the current session began (mirrors ranked SessionStats'
+    # session_start_time). default_factory rather than None + an explicit
+    # setter in _create_default_state() - this way a brand-new EventStats
+    # (first ever run, or reconstructed from a save that predates this
+    # field) both just work without special-casing.
+    session_start_time: datetime = field(default_factory=datetime.now)
+
     # Every completed run ever played, in completion order. Both session
     # and all-time totals are computed from this rather than stored as
     # separate counters, so there's only one source of truth and nothing
@@ -314,6 +321,12 @@ class EventStats:
             for milestone in event.milestones_met(run.wins):
                 counts[milestone.name] = counts.get(milestone.name, 0) + 1
         return counts
+
+    def session_duration(self) -> timedelta:
+        """Wall-clock time since the current session began. No pause/resume
+        concept here (unlike ranked mode) - event runs are discrete
+        win/loss-capped attempts, not a continuous game clock."""
+        return datetime.now() - self.session_start_time
 
     @property
     def alltime_runs_played(self) -> int:
@@ -392,6 +405,7 @@ class EventStats:
         session shouldn't keep showing a stale run's wins/losses."""
         self.current_run = None
         self.session_start_run_count = len(self.recent_runs)
+        self.session_start_time = datetime.now()
 
     def wipe_alltime(self) -> None:
         """Wipe all-time totals permanently. Also discards any in-progress
@@ -400,4 +414,5 @@ class EventStats:
         self.current_run = None
         self.recent_runs = []
         self.session_start_run_count = 0
+        self.session_start_time = datetime.now()
         self.run_goal_wins = None

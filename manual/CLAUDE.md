@@ -236,6 +236,36 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   ranked mode's longest strings (season countdown, "Platinum 2 (3/6)")
   and event mode's longest strings (event name, 2-option entry cost) -
   all fit on one line with margin to spare, single-row top bar restored.
+- `.left-panel, .right-panel` had `margin: 1` (all four sides) - dropped
+  to `margin: 0 1` (horizontal only) once the top bar shrank back to
+  `height: 3`, reclaiming 2 rows of usable panel height that vertical
+  margin was eating for no visual purpose (`#main-content` already has
+  its own `overflow-y: auto` and the top-bar border provides the visual
+  separation). `.left-panel` additionally gets `padding: 1 1 1 0` (left
+  padding dropped to 0, other sides unchanged) - a user-requested tweak,
+  the run panel's text was sitting further from its left border than the
+  stats panel's text was from its own.
+- Event Mode had no visible session timer (ranked mode has one via
+  `SessionStats.session_start_time`/`get_active_session_duration()`).
+  Added the same concept to `EventStats`: `session_start_time: datetime`
+  (`field(default_factory=datetime.now)`, so a brand-new EventStats - or
+  one reconstructed from a save that predates this field - just works
+  without a separate default-state code path) and `session_duration()`
+  (plain wall-clock `datetime.now() - session_start_time`, no pause/
+  resume - event runs are discrete win/loss-capped attempts, not a
+  continuous game clock like ranked's). Reset in both `restart_session()`
+  and `wipe_alltime()`, same as `session_start_run_count`. Displayed as a
+  "Started: 1:32 AM  Duration: 2m 15s" line at the top of the Session
+  section (`_format_duration()` is the shared H/M/S formatter, dropping
+  leading zero units). Ticks live: `EventStatsPanel._generate_session_content()`
+  was split out from `_create_session_section()` (mirrors ranked's
+  `_generate_session_content()`/`refresh_session_section()` split) so the
+  app's existing 1-second `set_interval` timer tick can re-render just
+  that one `Static` (`id="event-session-section"`) without rebuilding the
+  whole stats panel - `ManualTUIApp._update_session_timers()` used to
+  return immediately for event mode entirely (StatsPanel isn't mounted
+  there); it now calls `EventStatsPanel.refresh_session_section()`
+  instead of returning early.
 - Six ranked-only actions (`toggle_mythic`, `set_season_start`,
   `edit_stats`, `hide_tiers`, `set_rank`, and `view_all_notes` — bound to
   M/T/E/H/S and Ctrl+N respectively) have no Event Mode behavior at all,

@@ -5,6 +5,7 @@ EventRun, EventStats) and StateManager persistence round-trip.
 """
 import json
 import tempfile
+from datetime import timedelta
 from pathlib import Path
 
 from models.event import (
@@ -228,6 +229,32 @@ def test_event_stats_restart_session_discards_active_run():
     assert stats.current_run is None
 
 
+def test_event_stats_session_start_time_resets_on_restart_and_wipe():
+    """Test that session_start_time defaults to "now" on a fresh EventStats
+    (so a brand-new session's duration starts at ~0, not some huge/invalid
+    value), and gets reset again on restart_session()/wipe_alltime() -
+    otherwise the session timer would keep counting from the very first
+    session ever, not the current one."""
+    stats = EventStats()
+    initial_start = stats.session_start_time
+    assert initial_start is not None
+    assert stats.session_duration().total_seconds() < 1
+
+    # Simulate time passing by backdating session_start_time directly.
+    stats.session_start_time = initial_start - timedelta(hours=2)
+    assert stats.session_duration().total_seconds() >= 2 * 3600 - 1
+
+    stats.restart_session()
+    assert stats.session_start_time > initial_start
+    assert stats.session_duration().total_seconds() < 1
+
+    stats.session_start_time = stats.session_start_time - timedelta(hours=3)
+    before_wipe = stats.session_start_time
+    stats.wipe_alltime()
+    assert stats.session_start_time > before_wipe
+    assert stats.session_duration().total_seconds() < 1
+
+
 def test_event_stats_run_goal_wins_persists_across_restart():
     """Test that a run win goal survives restart_session() (mirrors
     ranked's session_goal_tier, which also isn't cleared on reset) - only
@@ -345,6 +372,36 @@ def test_state_manager_persists_event_stats():
         assert len(loaded.event_stats.recent_runs) == 1
         assert len(loaded.event_stats.recent_runs[0].games) == 8
         assert loaded.event_stats.recent_runs[0].games[0].result == EventGameResult.WIN
+
+
+def test_state_manager_round_trips_session_start_time():
+    """Test that session_start_time survives a save/load round trip as a
+    real datetime (not a string), and that a save file from before this
+    field existed falls back to session_start_time defaulting to "now"
+    rather than crashing or leaving it unset."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        from datetime import datetime as dt
+
+        sm = StateManager(data_dir=Path(temp_dir), save_enabled=True)
+        app_data = sm.load_state()
+        app_data.event_stats.session_start_time = dt(2026, 1, 1, 12, 0, 0)
+        sm.save_state(app_data)
+
+        sm2 = StateManager(data_dir=Path(temp_dir), save_enabled=True)
+        loaded = sm2.load_state()
+        assert isinstance(loaded.event_stats.session_start_time, dt)
+        assert loaded.event_stats.session_start_time == dt(2026, 1, 1, 12, 0, 0)
+
+        # Simulate a save from before session_start_time existed.
+        state_file = Path(temp_dir) / "tracker_state.json"
+        data = json.loads(state_file.read_text())
+        del data["event_stats"]["session_start_time"]
+        state_file.write_text(json.dumps(data, indent=2))
+
+        sm3 = StateManager(data_dir=Path(temp_dir), save_enabled=True)
+        reloaded = sm3.load_state()
+        assert isinstance(reloaded.event_stats.session_start_time, dt)
+        assert reloaded.event_stats.session_duration().total_seconds() < 5
 
 
 def test_state_manager_survives_renamed_field_in_saved_file():
@@ -550,11 +607,13 @@ def main():
     test_event_stats_session_and_alltime_aggregation()
     test_event_stats_tracks_play_draw_cumulatively()
     test_event_stats_restart_session_discards_active_run()
+    test_event_stats_session_start_time_resets_on_restart_and_wipe()
     test_event_stats_run_goal_wins_persists_across_restart()
     test_event_stats_wipe_alltime_clears_everything()
     test_event_stats_rejects_game_with_no_active_run()
     test_event_stats_concede_run_folds_partial_record()
     test_state_manager_persists_event_stats()
+    test_state_manager_round_trips_session_start_time()
     test_state_manager_survives_renamed_field_in_saved_file()
     test_state_manager_deserializes_datetimes_nested_in_lists()
     test_state_manager_export_import_round_trip()
