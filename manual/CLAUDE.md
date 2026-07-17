@@ -61,7 +61,10 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   "Net Gems: ..." on two lines), with the current in-progress run's own
   `net_profit_gems()` live-overlaid on top the same way the rest of
   Record/Prize already are. Gems/packs/net-gems values use `{:,}`
-  thousands separators.
+  thousands separators. The milestone-counts line in Session/All-Time
+  dropped its "Milestones: " label prefix too - just "Winning Run: 2,
+  Free Run: 1, ..." now, since the label is implied by every other
+  session-scoped line's context and it was pure clutter.
 - `EventStats` mirrors `SessionStats`'s session-vs-season split:
   `session_*` counters reset when you restart the event session (**R**
   in Event Mode), `alltime_*` counters never reset except via an explicit

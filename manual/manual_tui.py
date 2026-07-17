@@ -1236,7 +1236,7 @@ class EventStatsPanel(Static):
         milestone_counts = stats.session_milestone_counts(event) if event else {}
         if milestone_counts:
             counts_str = ", ".join(f"{k}: {v}" for k, v in milestone_counts.items())
-            lines.append(f"Milestones: {counts_str}")
+            lines.append(counts_str)
         return "\n".join(lines)
 
     def _create_session_section(self) -> Static:
@@ -1288,7 +1288,7 @@ class EventStatsPanel(Static):
         milestone_counts = stats.alltime_milestone_counts(event) if event else {}
         if milestone_counts:
             counts_str = ", ".join(f"{k}: {v}" for k, v in milestone_counts.items())
-            lines.append(f"Milestones: {counts_str}")
+            lines.append(counts_str)
         return Static("\n".join(lines), classes="event-stat-section")
 
 
