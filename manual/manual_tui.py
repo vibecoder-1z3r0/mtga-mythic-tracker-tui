@@ -3945,8 +3945,8 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
     def _event_restart_session(self) -> None:
         """Reset event session totals (keeps all-time totals), with confirmation."""
         modal = ConfirmationModal(
-            "Restart event session? This clears session totals and discards the "
-            "current run, if any (all-time totals are kept)."
+            "Restart event session? This clears session totals (all-time totals "
+            "and any in-progress run are kept)."
         )
 
         def handle_result(result):

@@ -290,9 +290,13 @@ def test_event_stats_tracks_play_draw_cumulatively():
     assert stats.alltime_draws == 0
 
 
-def test_event_stats_restart_session_discards_active_run():
-    """Test that restarting the session discards an in-progress run, rather
-    than leaving its stale wins/losses displayed after the reset."""
+def test_event_stats_restart_session_preserves_active_run():
+    """Regression test for a real data-loss incident: restart_session()
+    used to discard the in-progress run entirely, silently throwing away
+    real, already-played games with no way to recover them. A session
+    restart should only reset session-scoped totals/timer - an active run
+    keeps playing across the boundary and correctly counts toward the
+    *new* session once it completes."""
     event = load_test_event()
     stats = EventStats()
 
@@ -304,7 +308,18 @@ def test_event_stats_restart_session_discards_active_run():
     assert stats.current_run.status == EventRunStatus.ACTIVE
 
     stats.restart_session()
-    assert stats.current_run is None
+    assert stats.current_run is run
+    assert stats.current_run.status == EventRunStatus.ACTIVE
+    assert stats.current_run.wins == 1
+
+    # Finish the run off after the restart - it should fold into the NEW
+    # session's totals, not be lost or misattributed to the old one.
+    for _ in range(event.loss_cap):
+        stats.record_game(EventGame(result=EventGameResult.LOSS), event)
+    assert stats.current_run.status == EventRunStatus.ENDED
+    assert stats.session_wins == 1
+    assert stats.session_losses == event.loss_cap
+    assert stats.session_runs_played == 1
 
 
 def test_event_stats_session_start_time_resets_on_restart_and_wipe():
@@ -729,7 +744,7 @@ def main():
     test_event_stats_session_and_alltime_net_gems()
     test_event_stats_session_and_alltime_aggregation()
     test_event_stats_tracks_play_draw_cumulatively()
-    test_event_stats_restart_session_discards_active_run()
+    test_event_stats_restart_session_preserves_active_run()
     test_event_stats_session_start_time_resets_on_restart_and_wipe()
     test_event_stats_pause_resume_excludes_paused_time_from_duration()
     test_event_stats_run_goal_wins_persists_across_restart()

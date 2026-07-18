@@ -389,6 +389,27 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   lookup, run completion, session/all-time aggregation, a StateManager
   save/load round-trip, the renamed-field and nested-datetime regression
   cases above, and an export/import round trip.
+- **Second incident**: `restart_session()` set `current_run = None`
+  unconditionally, discarding an in-progress run's already-played games
+  with no way to recover them, if a session restart happened mid-run.
+  This was a design decision made unprompted when `restart_session()`
+  was first written (the docstring even rationalized it: "a restarted
+  session shouldn't keep showing a stale run's wins/losses") and it cost
+  a real user real data before anyone questioned it - the confirmation
+  modal even warned about it ("discards the current run, if any") and
+  that framing itself should have been the signal something was wrong.
+  Fixed by leaving `current_run` untouched across a session restart -
+  only `session_start_run_count`/`session_start_time`/pause state reset.
+  An active run keeps playing across the boundary and correctly lands in
+  the *new* session's totals once it completes, since its eventual index
+  in `recent_runs` will be >= the new `session_start_run_count`. The
+  regression test (`test_event_stats_restart_session_preserves_active_run`,
+  renamed from `..._discards_active_run` which had asserted the buggy
+  behavior as correct) now asserts the run survives the restart and
+  folds into the new session normally. `wipe_alltime()` still discards
+  `current_run` deliberately - that's a much more drastic, explicit,
+  confirmation-gated "erase everything forever" action, not a routine
+  session boundary.
 
 ## TUI Layout
 

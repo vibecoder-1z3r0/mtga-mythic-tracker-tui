@@ -454,9 +454,11 @@ class EventStats:
         recent_runs[session_start_run_count:]) read as zero going forward,
         since nothing's been completed since this new marker, while
         all-time totals (computed from the full recent_runs) are
-        unaffected. Also discards any in-progress run, since a restarted
-        session shouldn't keep showing a stale run's wins/losses."""
-        self.current_run = None
+        unaffected. Does NOT touch current_run - an in-progress run is
+        real, already-played games that must survive a session restart;
+        it keeps playing normally and will correctly land in the *new*
+        session's totals once it completes (its index in recent_runs
+        will be >= session_start_run_count)."""
         self.session_start_run_count = len(self.recent_runs)
         self.session_start_time = datetime.now()
         self.session_paused = False
