@@ -2499,7 +2499,7 @@ class EventGameNotesModal(ModalScreen):
 
     .event-notes-modal-container {
         width: 60;
-        height: 38;
+        height: 30;
         border: solid $primary;
         background: $surface;
         padding: 2;
@@ -2508,7 +2508,6 @@ class EventGameNotesModal(ModalScreen):
 
     .event-notes-row {
         height: 3;
-        margin-bottom: 1;
     }
 
     .event-notes-label {
@@ -2550,22 +2549,6 @@ class EventGameNotesModal(ModalScreen):
                 "Game Info (Unknown is fine)" if self.forced else "Edit Game",
                 classes="modal-title",
             )
-            if self.include_result:
-                with Horizontal(classes="event-notes-row"):
-                    yield Static("Result:", classes="event-notes-label")
-                    yield Select(
-                        [("Win", "Win"), ("Loss", "Loss")],
-                        value=self.existing.get("result") or "Win",
-                        id="event-result-select",
-                        allow_blank=False,
-                    )
-            with Horizontal(classes="event-notes-row"):
-                yield Static("Opponent Deck:", classes="event-notes-label")
-                yield Input(
-                    value=self.existing.get("opponent_deck") or "",
-                    placeholder="e.g. Mono Red (blank = Unknown)",
-                    id="event-opp-deck-input",
-                )
             with Horizontal(classes="event-notes-row"):
                 yield Static("Opponent Name:", classes="event-notes-label")
                 yield Input(
@@ -2580,6 +2563,22 @@ class EventGameNotesModal(ModalScreen):
                     value=self.existing.get("play_draw") or "Unknown",
                     id="event-play-draw-select",
                 )
+            with Horizontal(classes="event-notes-row"):
+                yield Static("Opponent Deck:", classes="event-notes-label")
+                yield Input(
+                    value=self.existing.get("opponent_deck") or "",
+                    placeholder="e.g. Mono Red (blank = Unknown)",
+                    id="event-opp-deck-input",
+                )
+            if self.include_result:
+                with Horizontal(classes="event-notes-row"):
+                    yield Static("Result:", classes="event-notes-label")
+                    yield Select(
+                        [("Win", "Win"), ("Loss", "Loss")],
+                        value=self.existing.get("result") or "Win",
+                        id="event-result-select",
+                        allow_blank=False,
+                    )
             yield Static("Notes:")
             yield TextArea(
                 text=self.existing.get("notes") or "",

@@ -434,6 +434,18 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   modal - it only needs to read an existing export, so it doesn't need
   any of the Textual event-loop/widget machinery a TUI-integrated export
   would, and can be rerun/tweaked independently of the app.
+- `EventGameNotesModal` had a real layout bug (reported via screenshot: a
+  large empty gap above the fields, and the box overrunning the bottom of
+  the terminal): `.event-notes-modal-container`'s CSS `height` had been
+  bumped to 38 when `opponent_name` was added, well past what the fields
+  actually need, and `.event-notes-row { margin-bottom: 1; }` added a full
+  blank row after each of the 4 input rows on top of that - not a
+  centering bug, just an oversized box plus unnecessary per-row margin.
+  Fixed by dropping `margin-bottom` entirely and shrinking the container
+  to `height: 30`, verified via headless-pilot `.region` measurements to
+  exactly fill a 121x30 terminal with the Save button fully visible and
+  zero leftover space. Field order was also changed, per request, to
+  Opponent Name / Play-Draw / Opponent Deck / Result / Notes.
 
 ## TUI Layout
 
