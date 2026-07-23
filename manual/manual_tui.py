@@ -2516,6 +2516,10 @@ class EventGameNotesModal(ModalScreen):
         padding-right: 1;
     }
 
+    .event-notes-input {
+        width: 34;
+    }
+
     .event-notes-textarea {
         height: 6;
         margin: 0 0 1 0;
@@ -2555,6 +2559,7 @@ class EventGameNotesModal(ModalScreen):
                     value=self.existing.get("opponent_name") or "",
                     placeholder="MTGA username (blank = Unknown)",
                     id="event-opp-name-input",
+                    classes="event-notes-input",
                 )
             with Horizontal(classes="event-notes-row"):
                 yield Static("Play/Draw:", classes="event-notes-label")
@@ -2569,6 +2574,7 @@ class EventGameNotesModal(ModalScreen):
                     value=self.existing.get("opponent_deck") or "",
                     placeholder="e.g. Mono Red (blank = Unknown)",
                     id="event-opp-deck-input",
+                    classes="event-notes-input",
                 )
             if self.include_result:
                 with Horizontal(classes="event-notes-row"):
@@ -3459,7 +3465,6 @@ class ManualTUIApp(App):
                 self.app_data.current_format = format_type
                 self.notify(f"Switched to {format_type.value}", severity="information")
             self.refresh_panels()
-            self.update_status()
 
         self.push_screen(modal, handle_result)
     
@@ -4272,9 +4277,6 @@ Press any key to close this help."""
     
     def refresh_panels(self) -> None:
         """Refresh all panels with current data."""
-        # Update the top panel
-        self.update_status()
-
         # Force refresh of rank progress panel by removing and re-adding
         try:
             main_content = self.query_one("#main-content")
@@ -4298,6 +4300,11 @@ Press any key to close this help."""
         except Exception as e:
             # Log the error but continue
             self.notify(f"Panel refresh error: {e}", severity="warning")
+
+        # Update the top panel and session timers - must run after the
+        # panel swap above, since it queries for whichever panel type
+        # matches the (possibly just-changed) view_mode.
+        self.update_status()
     
     def on_exit(self) -> None:
         """Save state before exit."""

@@ -445,7 +445,29 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   to `height: 30`, verified via headless-pilot `.region` measurements to
   exactly fill a 121x30 terminal with the Save button fully visible and
   zero leftover space. Field order was also changed, per request, to
-  Opponent Name / Play-Draw / Opponent Deck / Result / Notes.
+  Opponent Name / Play-Draw / Opponent Deck / Result / Notes. The
+  Opponent Name/Opponent Deck `Input` fields also got their own
+  `.event-notes-input { width: 34; }` class - they were stretching to
+  fill the same width as the Select dropdowns (~38 cols via the default
+  1fr), which looked wrong for short free-text fields like a username;
+  the Select boxes were left alone since they weren't flagged.
+- Switching format/view mode (**F**) or pausing/resuming the session
+  timer (**P**) could throw a visible `"Session timer error: No nodes
+  match <class '...StatsPanel'>"` (or `EventStatsPanel`) toast. Root
+  cause: `refresh_panels()` called `self.update_status()` - which reads
+  `self.app_data.view_mode` to decide whether to query `StatsPanel` or
+  `EventStatsPanel` - *before* actually removing the old panel and
+  mounting the new one. Any caller that flips `view_mode` first and then
+  calls `refresh_panels()` (e.g. `action_switch_format`'s
+  `handle_result`) hit a real window where `view_mode` already pointed
+  at the new mode but the old panel type was still the only one mounted,
+  so the query correctly found nothing. Fixed by moving the
+  `update_status()` call to the end of `refresh_panels()`, after the
+  panel swap, so it always queries for whatever panel type is actually
+  on screen; also dropped the now-redundant extra `update_status()` call
+  in `action_switch_format`. Reproduced and verified fixed via a headless
+  pilot that switches modes and presses P, asserting zero error-severity
+  notifications.
 
 ## TUI Layout
 
