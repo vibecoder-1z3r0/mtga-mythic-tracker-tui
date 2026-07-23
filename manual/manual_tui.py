@@ -2499,7 +2499,7 @@ class EventGameNotesModal(ModalScreen):
 
     .event-notes-modal-container {
         width: 60;
-        height: 34;
+        height: 38;
         border: solid $primary;
         background: $surface;
         padding: 2;
@@ -2567,6 +2567,13 @@ class EventGameNotesModal(ModalScreen):
                     id="event-opp-deck-input",
                 )
             with Horizontal(classes="event-notes-row"):
+                yield Static("Opponent Name:", classes="event-notes-label")
+                yield Input(
+                    value=self.existing.get("opponent_name") or "",
+                    placeholder="MTGA username (blank = Unknown)",
+                    id="event-opp-name-input",
+                )
+            with Horizontal(classes="event-notes-row"):
                 yield Static("Play/Draw:", classes="event-notes-label")
                 yield Select(
                     [("Unknown", "Unknown"), ("Play", "Play"), ("Draw", "Draw")],
@@ -2592,10 +2599,12 @@ class EventGameNotesModal(ModalScreen):
 
     def _save(self) -> None:
         opp_deck = self.query_one("#event-opp-deck-input", Input).value.strip()
+        opp_name = self.query_one("#event-opp-name-input", Input).value.strip()
         play_draw = self.query_one("#event-play-draw-select", Select).value
         notes = self.query_one("#event-game-notes-textarea", TextArea).text.strip()
         result = {
             "opponent_deck": opp_deck or None,
+            "opponent_name": opp_name or None,
             "play_draw": play_draw if play_draw != "Unknown" else None,
             "notes": notes,
         }
@@ -2638,7 +2647,7 @@ class EventGamesViewerModal(ModalScreen):
     }
 
     #event-games-dialog {
-        width: 95;
+        width: 115;
         height: 30;
         border: thick $primary;
         background: $surface;
@@ -2680,7 +2689,9 @@ class EventGamesViewerModal(ModalScreen):
                 classes="help-text",
             )
             table = DataTable(id="event-games-table", classes="event-games-list")
-            table.add_columns("Run", "#", "Result", "Play/Draw", "Your Deck", "Opponent Deck")
+            table.add_columns(
+                "Run", "#", "Result", "Play/Draw", "Your Deck", "Opponent Deck", "Opponent Name"
+            )
             table.cursor_type = "row"
             yield table
             with Horizontal(classes="event-games-buttons"):
@@ -2722,6 +2733,7 @@ class EventGamesViewerModal(ModalScreen):
                     _format_play_draw(game.play_draw),
                     run.player_deck or "Unknown",
                     game.opponent_deck or "Unknown",
+                    game.opponent_name or "Unknown",
                 )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -2740,6 +2752,7 @@ class EventGamesViewerModal(ModalScreen):
             {
                 "result": game.result.value,
                 "opponent_deck": game.opponent_deck,
+                "opponent_name": game.opponent_name,
                 "play_draw": game.play_draw,
                 "notes": game.notes,
             },
@@ -2756,6 +2769,7 @@ class EventGamesViewerModal(ModalScreen):
 
     def _apply_edit(self, run: "EventRun", game: EventGame, result: dict) -> None:
         game.opponent_deck = result.get("opponent_deck")
+        game.opponent_name = result.get("opponent_name")
         game.play_draw = result.get("play_draw")
         game.notes = result.get("notes") or ""
 
@@ -3876,6 +3890,7 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
         game = EventGame(
             result=result,
             opponent_deck=notes.get("opponent_deck"),
+            opponent_name=notes.get("opponent_name"),
             play_draw=notes.get("play_draw"),
             notes=notes.get("notes") or "",
         )

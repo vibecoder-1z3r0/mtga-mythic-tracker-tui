@@ -24,6 +24,8 @@ from storage.state_manager import StateManager
 # _run_result_emoji - everything else in this file is model-layer only).
 from manual_tui import _run_result_emoji
 
+from export_matchup_csv import build_rows
+
 
 def load_test_event():
     """Load the Historic Pauper Challenge definition from the real catalog."""
@@ -78,6 +80,16 @@ def test_event_game_records_play_draw_and_opponent_deck():
     game_known = EventGame(result=EventGameResult.LOSS, play_draw="Draw", opponent_deck="Mono Red")
     assert game_known.play_draw == "Draw"
     assert game_known.opponent_deck == "Mono Red"
+
+
+def test_event_game_records_opponent_name():
+    """Test that EventGame carries the opponent's MTGA username, defaulting
+    to None for games recorded before this field existed."""
+    game_unknown = EventGame(result=EventGameResult.WIN)
+    assert game_unknown.opponent_name is None
+
+    game_known = EventGame(result=EventGameResult.WIN, opponent_name="endlessnumber")
+    assert game_known.opponent_name == "endlessnumber"
 
 
 def test_event_run_completes_at_caps():
@@ -625,6 +637,62 @@ def test_state_manager_export_import_round_trip():
         assert not sm.state_file.exists()
 
 
+def test_build_matchup_csv_rows():
+    """Test export_matchup_csv.build_rows() against the exact column
+    semantics agreed with a user who wanted this data in a specific
+    external tool's format: Time/ReportingPlayer/Opponent/Archetype1
+    (your deck)/Archetype2 (opponent deck)/GameType (always 0)/
+    PlayDrawKnown (1=play, 2=draw, blank=unrecorded)/Winner(1|2)/
+    ArchetypeWinner (whichever archetype actually won)."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        event = load_test_event()
+        sm = StateManager(data_dir=Path(temp_dir), save_enabled=True)
+        app_data = sm.load_state()
+        app_data.event_stats.event_id = event.event_id
+
+        run = EventRun(
+            run_id="r1", event_id=event.event_id, entry_currency="Gems", player_deck="Orzhov Skyfisher"
+        )
+        app_data.event_stats.start_run(run)
+        app_data.event_stats.record_game(
+            EventGame(
+                result=EventGameResult.WIN,
+                opponent_deck="4C Trovatore",
+                opponent_name="endlessnumber",
+                play_draw="Play",
+            ),
+            event,
+        )
+        app_data.event_stats.record_game(
+            EventGame(result=EventGameResult.LOSS, opponent_deck="4C Trovatore", play_draw="Draw"), event
+        )
+        # No opponent info recorded at all (an older game, or just skipped).
+        app_data.event_stats.record_game(EventGame(result=EventGameResult.WIN), event)
+
+        rows = build_rows(app_data, "Tyraziel")
+        assert len(rows) == 3
+
+        win_row = rows[0]
+        assert win_row["ReportingPlayer"] == "Tyraziel"
+        assert win_row["Opponent"] == "endlessnumber"
+        assert win_row["Archetype1"] == "Orzhov Skyfisher"
+        assert win_row["Archetype2"] == "4C Trovatore"
+        assert win_row["GameType"] == 0
+        assert win_row["PlayDrawKnown"] == 1
+        assert win_row["Winner(1|2)"] == 1
+        assert win_row["ArchetypeWinner"] == "Orzhov Skyfisher"
+
+        loss_row = rows[1]
+        assert loss_row["PlayDrawKnown"] == 2
+        assert loss_row["Winner(1|2)"] == 2
+        assert loss_row["ArchetypeWinner"] == "4C Trovatore"
+
+        unknown_row = rows[2]
+        assert unknown_row["Opponent"] == ""
+        assert unknown_row["Archetype2"] == "Unknown"
+        assert unknown_row["PlayDrawKnown"] == ""
+
+
 def test_state_manager_recomputes_alltime_from_stale_stored_counters():
     """Regression test: a save file written by an older version that still
     stored alltime_wins/losses/gems/packs/plays/draws/milestone_counts as
@@ -736,6 +804,7 @@ def main():
     test_prize_for_wins()
     test_milestones()
     test_event_game_records_play_draw_and_opponent_deck()
+    test_event_game_records_opponent_name()
     test_event_run_completes_at_caps()
     test_event_run_prize_and_profit()
     test_run_result_emoji_matches_real_prize_table()
@@ -756,6 +825,7 @@ def main():
     test_state_manager_survives_renamed_field_in_saved_file()
     test_state_manager_deserializes_datetimes_nested_in_lists()
     test_state_manager_export_import_round_trip()
+    test_build_matchup_csv_rows()
     test_state_manager_recomputes_alltime_from_stale_stored_counters()
     test_state_manager_legacy_save_treats_all_history_as_current_session()
     print("All manual-TUI event model tests passed!")

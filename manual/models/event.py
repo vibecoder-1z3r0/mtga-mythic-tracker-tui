@@ -157,6 +157,7 @@ class EventGame:
     result: EventGameResult
     timestamp: datetime = field(default_factory=datetime.now)
     opponent_deck: Optional[str] = None
+    opponent_name: Optional[str] = None  # opponent's MTGA username, if known
     play_draw: Optional[str] = None  # "Play" or "Draw", None if unrecorded
     notes: str = ""
 

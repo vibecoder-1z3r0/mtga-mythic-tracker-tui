@@ -410,6 +410,30 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   `current_run` deliberately - that's a much more drastic, explicit,
   confirmation-gated "erase everything forever" action, not a routine
   session boundary.
+- `EventGame.opponent_name` (opponent's MTGA username, distinct from
+  `opponent_deck` which is their archetype) - added for external matchup-
+  analysis exports, since that data was never captured before and can't
+  be backfilled for existing games. Wired into `EventGameNotesModal`
+  (**N** and the **Ctrl+G** edit flow) alongside the existing Opponent
+  Deck field, and shown as its own column in the Ctrl+G games table.
+  `_known_fields()` already handles old saves missing this field with no
+  extra code, same as every other field addition this session.
+- `export_matchup_csv.py` - a standalone converter (not a TUI feature),
+  reading a Ctrl+E export (or the live `tracker_state.json`) via
+  `StateManager.import_state()` and writing one CSV row per game across
+  every run (completed and, if any, the current in-progress one), for a
+  specific external tool's column format agreed with a user: `Time`,
+  `ReportingPlayer` (CLI flag, default "Tyraziel" - not a persisted app
+  setting, since making it one was explicitly left as a "maybe later"),
+  `Opponent` (blank for the vast majority of pre-existing games, since
+  `opponent_name` didn't exist until now), `Archetype1`/`Archetype2`
+  (your deck for that run / the opponent's deck for that game),
+  `GameType` (always 0), `PlayDrawKnown` (1=play, 2=draw, blank if
+  unrecorded), `Winner(1|2)`, and `ArchetypeWinner` (whichever archetype
+  actually won). Deliberately external rather than a new TUI keybinding/
+  modal - it only needs to read an existing export, so it doesn't need
+  any of the Textual event-loop/widget machinery a TUI-integrated export
+  would, and can be rerun/tweaked independently of the app.
 
 ## TUI Layout
 
