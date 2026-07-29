@@ -26,6 +26,7 @@ A completely standalone Terminal User Interface (TUI) application for manually t
 ✅ **Season Management** - Countdown timers, editable dates  
 ✅ **State Persistence** - Auto-save/load with CLI options  
 ✅ **Event Mode** - Run-based event tracking (Historic Pauper Challenge, etc.), selected via the **F** switch-mode modal
+✅ **Mid Week Magic Mode** - Flat game-log tracking for the no-run, no-cap weekly event, selected via the same **F** switch-mode modal
 
 ### Event Mode (run-based events, e.g. Historic Pauper Challenge)
 A second, independent tracking mode alongside the ranked ladder, for events
@@ -468,6 +469,84 @@ Kept fully standalone (dataclasses, no imports from the parent project's
   in `action_switch_format`. Reproduced and verified fixed via a headless
   pilot that switches modes and presses P, asserting zero error-severity
   notifications.
+
+### Mid Week Magic Mode (no-run, no-cap weekly event)
+A third mode alongside ranked and Event Mode, for Mid Week Magic - MTGA's
+free weekly event with no win/loss cap, no entry cost, and no prize table.
+Built by copying Event Mode's session/all-time/pause-timer machinery
+(proven and, as of this session, bug-free) but **without** its `EventRun`
+wrapper: Mid Week Magic games are recorded directly against `MWMStats`,
+since there's no win/loss cap to group them into runs.
+
+- `models/mwm.py` — `MWMFormatDefinition` (format_id/name/format/dates,
+  no win_cap/loss_cap/entry_options/prize_table/milestones - none of
+  those exist for this event type), `MWMGame` (result, timestamp,
+  `player_deck` **and** opponent_deck/opponent_name/play_draw/notes -
+  unlike `EventGame`, MWM tracks the player's own deck per-game rather
+  than once per run, since a user can swap decks mid-session), `MWMStats`
+  (current session + all-time, mirroring `EventStats`'s
+  session_start_time/pause fields and its "boundary index into a list"
+  trick for session-vs-all-time - but the list is `games: List[MWMGame]`
+  directly, no run wrapper).
+- `mwm_formats.json` (this directory) — hand-edited catalog of weekly
+  formats, append-only (a new week's format is added as a new entry
+  rather than replacing the old one). `current_mwm_format(catalog)`
+  always uses the **last** entry as "this week's" format - there's no
+  per-run event-picker like Event Mode's `_get_event_for_stats()` needs,
+  since Mid Week Magic isn't grouped into runs at all; the catalog is
+  simply edited by hand each week and the newest entry wins.
+- `current_deck` is set at the session level (**D** key, reusing
+  `SetEventDeckModal` with a custom title) and prefills each new game's
+  `player_deck` - but each game can still override it individually via
+  **N**'s new "Your Deck" field, since decks can change mid-session. This
+  is why `EventGameNotesModal` gained an `include_player_deck: bool`
+  flag (Event Mode never needs it - a run's deck is fixed for that run's
+  whole duration) rather than a whole separate modal class.
+- UI: `MWMPanel` (left - format name, current deck, session record, last
+  game) and `MWMStatsPanel` (right - session/all-time/trends, styled
+  identically to `EventStatsPanel` but with no prize/milestone lines
+  since neither exists for this mode) are mounted when
+  `view_mode == "mwm"`, chosen via the same **F** `SwitchModeModal` (now
+  a 3rd row: "Mid Week Magic"). `TopPanel` also gained a
+  `_update_mwm_display()` branch (format name / current deck / session
+  record / last opponent), alongside its existing ranked/event branches.
+- Keybindings are context-dispatched the same way Event Mode's are: **W**/
+  **L** record a game (prompting for deck/opponent info if nothing was
+  staged via **N**, same "Unknown is a valid one-keypress answer"
+  pattern), **D** sets the session-level current deck, **N** stages the
+  next game's info, **Ctrl+G** opens `MWMGamesViewerModal` (a flat,
+  single-table history - no second "browse runs" level like Event Mode's
+  Ctrl+R, since there are no runs to browse), **R**/**Ctrl+W** restart
+  the session / wipe all-time. **U** (start run) and **Ctrl+R** (run
+  history) have no meaning here and are hidden from the Footer via a new
+  `EVENT_ONLY_ACTIONS` set (parallel to the existing `RANKED_ONLY_ACTIONS`
+  - `check_action()` now hides ranked-only actions whenever
+  `view_mode != "ranked"`, not just `== "event"`, so Mid Week Magic
+  correctly hides them too). **G** (goal) and **C** (collapse/concede) -
+  both already context-dispatched for ranked vs. event - just notify
+  "Not applicable in Mid Week Magic mode" here, since there's neither a
+  rank nor a run for either action to act on.
+- Editing a game's result in `MWMGamesViewerModal._apply_edit()` needs
+  none of Event Mode's old un-fold/re-fold dance for completed runs -
+  there's no "completed vs. active" distinction for a flat game list,
+  `session_wins`/`alltime_wins`/etc. are always computed live from
+  `MWMStats.games`, so mutating `game.result` in place (it's a member of
+  that same list) is reflected everywhere automatically.
+- **Found and fixed a real, pre-existing bug in `EventGamesViewerModal.
+  _apply_edit()`** while building its MWM equivalent: for a game
+  belonging to an *already-ended* run, it tried
+  `stats.session_wins += ...` / `stats.session_gems += ...` /
+  `stats.session_milestone_counts[name] = ...` - all leftover from
+  before `EventStats`'s session/all-time totals became computed
+  properties. `session_wins` has no setter (crashes with
+  `AttributeError`), `session_gems`/`session_packs` don't exist as
+  fields at all, and `session_milestone_counts` is a method, not a
+  dict. Editing the **result** of a game in an ended run via Ctrl+G (or
+  Ctrl+R's "View Games") crashed outright - reproduced directly against
+  the model layer before fixing. Fixed the same way MWM's version works:
+  `game.result = new_result` alone is sufficient, since `run` is the
+  same object already living in `recent_runs` and everything reads from
+  there live.
 
 ## TUI Layout
 

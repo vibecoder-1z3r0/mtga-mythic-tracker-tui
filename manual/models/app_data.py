@@ -9,6 +9,7 @@ from typing import List, Optional
 from .rank import ManualRank, RankTier, FormatType
 from .session import SessionStats
 from .event import EventStats
+from .mwm import MWMStats
 
 
 @dataclass
@@ -24,7 +25,8 @@ class AppData:
     auto_collapse_mode: bool = False
     auto_hide_mode: bool = False
     event_stats: EventStats = field(default_factory=EventStats)
-    view_mode: str = "ranked"  # "ranked" or "event" - which panels are shown
+    mwm_stats: MWMStats = field(default_factory=MWMStats)
+    view_mode: str = "ranked"  # "ranked", "event", or "mwm" - which panels are shown
 
     def __post_init__(self):
         if self.collapsed_tiers is None:

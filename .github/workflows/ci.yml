@@ -64,4 +64,4 @@ jobs:
       - name: Run tests (pytest)
         run: |
           cd manual
-          pytest test_event_models.py -v
+          pytest test_event_models.py test_mwm_models.py -v

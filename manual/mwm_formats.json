@@ -1,0 +1,11 @@
+{
+  "formats": [
+    {
+      "format_id": "historic_pauper",
+      "name": "Historic Pauper",
+      "format": "Best of One",
+      "start_date": null,
+      "end_date": null
+    }
+  ]
+}

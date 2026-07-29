@@ -20,6 +20,11 @@ from models import (
     EventRunStatus,
     EventStats,
 )
+from models import (
+    MWMGame,
+    MWMGameResult,
+    MWMStats,
+)
 
 
 def _known_fields(cls, data: dict) -> dict:
@@ -118,6 +123,9 @@ class StateManager:
             self._reconstruct_event_stats(event_stats_data) if event_stats_data else EventStats()
         )
 
+        mwm_stats_data = data.get('mwm_stats')
+        mwm_stats = self._reconstruct_mwm_stats(mwm_stats_data) if mwm_stats_data else MWMStats()
+
         return AppData(
             constructed_rank=constructed_rank,
             limited_rank=limited_rank,
@@ -129,6 +137,7 @@ class StateManager:
             auto_collapse_mode=data.get('auto_collapse_mode', False),
             auto_hide_mode=data.get('auto_hide_mode', False),
             event_stats=event_stats,
+            mwm_stats=mwm_stats,
             view_mode=data.get('view_mode', 'ranked')
         )
 
@@ -188,6 +197,7 @@ class StateManager:
             'auto_collapse_mode': app_data.auto_collapse_mode,
             'auto_hide_mode': app_data.auto_hide_mode,
             'event_stats': asdict(app_data.event_stats),
+            'mwm_stats': asdict(app_data.mwm_stats),
             'view_mode': app_data.view_mode
         }
         self._serialize_datetimes(data)
@@ -341,3 +351,15 @@ class StateManager:
             self._reconstruct_event_run(r) for r in stats_dict.get('recent_runs', [])
         ]
         return EventStats(**_known_fields(EventStats, stats_dict))
+
+    def _reconstruct_mwm_game(self, game_dict: dict) -> MWMGame:
+        """Rebuild an MWMGame from its serialized dict form."""
+        game_dict = dict(game_dict)
+        game_dict['result'] = MWMGameResult(game_dict['result'])
+        return MWMGame(**_known_fields(MWMGame, game_dict))
+
+    def _reconstruct_mwm_stats(self, stats_dict: dict) -> MWMStats:
+        """Rebuild MWMStats (and its nested games) from serialized form."""
+        stats_dict = dict(stats_dict)
+        stats_dict['games'] = [self._reconstruct_mwm_game(g) for g in stats_dict.get('games', [])]
+        return MWMStats(**_known_fields(MWMStats, stats_dict))

@@ -35,6 +35,15 @@ from models import (
     default_catalog_path,
     load_event_catalog,
 )
+from models import (
+    MWMFormatDefinition,
+    MWMGame,
+    MWMGameResult,
+    MWMStats,
+    current_mwm_format,
+    default_mwm_catalog_path,
+    load_mwm_catalog,
+)
 from storage import StateManager
 
 # === MODELS === (NOW IMPORTED FROM models/ PACKAGE)
@@ -98,12 +107,19 @@ class EditableText(Static):
 
 class TopPanel(Static):
     """Top panel with season info, current status, and session overview
-    (ranked), or event/entry/run/milestone info (Event Mode)."""
+    (ranked), event/entry/run/milestone info (Event Mode), or
+    format/deck/record info (Mid Week Magic)."""
 
-    def __init__(self, app_data: AppData, event_catalog: Optional[List[EventDefinition]] = None):
+    def __init__(
+        self,
+        app_data: AppData,
+        event_catalog: Optional[List[EventDefinition]] = None,
+        mwm_catalog: Optional[List[MWMFormatDefinition]] = None,
+    ):
         super().__init__()
         self.app_data = app_data
         self.event_catalog = event_catalog or []
+        self.mwm_catalog = mwm_catalog or []
 
     def compose(self) -> ComposeResult:
         with Horizontal(classes="top-panel-layout"):
@@ -127,8 +143,38 @@ class TopPanel(Static):
         """Update top panel display for whichever view mode is active."""
         if self.app_data.view_mode == "event":
             self._update_event_display()
+        elif self.app_data.view_mode == "mwm":
+            self._update_mwm_display()
         else:
             self._update_ranked_display()
+
+    def _update_mwm_display(self):
+        """Update the top panel for Mid Week Magic: format name, current
+        deck, session record, and last game's opponent."""
+        stats = self.app_data.mwm_stats
+        format_def = current_mwm_format(self.mwm_catalog)
+
+        if not format_def:
+            season_content = "🎮 No formats configured"
+        else:
+            season_content = f"🎮 {format_def.name} ({format_def.format})"
+
+        format_content = f"🃏 Deck: {stats.current_deck or 'Unknown'}"
+        bars_content = f"🎮 Record: {stats.session_wins}W-{stats.session_losses}L"
+
+        if stats.games:
+            last_game = stats.games[-1]
+            rank_content = f"🏅 Last: vs {last_game.opponent_deck or 'Unknown'}"
+        else:
+            rank_content = "🏅 --"
+
+        try:
+            self.query_one(".top-season", Static).update(season_content)
+            self.query_one(".top-format", Static).update(format_content)
+            self.query_one(".top-bars", Static).update(bars_content)
+            self.query_one(".top-rank", Static).update(rank_content)
+        except Exception:
+            pass  # Ignore if widgets not found during startup
 
     def _update_event_display(self):
         """Update the top panel for Event Mode: event name, entry cost,
@@ -1346,6 +1392,138 @@ class EventStatsPanel(Static):
         return Static("\n".join(lines), classes="event-stat-section")
 
 
+class MWMPanel(Static):
+    """Left panel showing current Mid Week Magic status.
+
+    Unlike Event Mode, there's no run wrapper - games are recorded
+    directly, so this panel is just "what deck, what was the last game,
+    what's the session record so far" rather than a win/loss-capped run's
+    pips.
+    """
+
+    def __init__(self, app_data: AppData, mwm_catalog: List[MWMFormatDefinition]):
+        super().__init__()
+        self.app_data = app_data
+        self.mwm_catalog = mwm_catalog
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield self._create_status_section()
+            yield Static("─" * 30, classes="separator")
+            yield Static(
+                "[W] Win  [L] Loss  [D] Set Deck  [N] Opp Deck/Play-Draw  "
+                "[Ctrl+G] Game History  [R] Restart Session  "
+                "[Ctrl+W] Wipe All-Time  [F] Switch Mode",
+                classes="help-text",
+            )
+
+    def _create_status_section(self) -> Static:
+        stats = self.app_data.mwm_stats
+        format_def = current_mwm_format(self.mwm_catalog)
+        lines = ["🎮 MID WEEK MAGIC", ""]
+
+        if format_def:
+            lines.append(f"{format_def.name} ({format_def.format})")
+        else:
+            lines.append("No formats configured in mwm_formats.json")
+
+        lines.append(f"Deck: {stats.current_deck or 'Unknown'}")
+        lines.append("")
+        lines.append(f"Record: [{stats.session_wins}W] - [{stats.session_losses}L]")
+
+        if stats.games:
+            last_game = stats.games[-1]
+            play_draw = _format_play_draw(last_game.play_draw)
+            opp_deck = last_game.opponent_deck or "Unknown"
+            lines.append(f"Last game: {play_draw}, vs {opp_deck}")
+            lines.append(_on_the_play_line(stats.session_plays, stats.session_draws))
+
+        return Static("\n".join(lines), classes="mwm-stat-section")
+
+
+class MWMStatsPanel(Static):
+    """Right panel showing Mid Week Magic session and all-time stats."""
+
+    def __init__(self, app_data: AppData, mwm_catalog: List[MWMFormatDefinition]):
+        super().__init__()
+        self.app_data = app_data
+        self.mwm_catalog = mwm_catalog
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield self._create_session_section()
+            yield self._create_alltime_section()
+            yield self._create_trends_section()
+
+    def _generate_session_content(self) -> str:
+        stats = self.app_data.mwm_stats
+        started = stats.session_start_time.strftime("%I:%M %p").lstrip("0")
+        duration = _format_duration(stats.session_duration())
+        pause_status = " ⏸️ PAUSED" if stats.session_paused else ""
+        return "\n".join(
+            [
+                "📊 CURRENT SESSION",
+                f"Started: {started}  Duration: {duration}{pause_status}",
+                f"Games played: {stats.session_games_played}",
+                f"Record: [{stats.session_wins}W] - [{stats.session_losses}L]"
+                f"{_win_pct(stats.session_wins, stats.session_losses)}",
+                _on_the_play_line(stats.session_plays, stats.session_draws),
+            ]
+        )
+
+    def _create_session_section(self) -> Static:
+        return Static(
+            self._generate_session_content(), classes="mwm-stat-section", id="mwm-session-section"
+        )
+
+    def refresh_session_section(self) -> None:
+        """Refresh just the session section's text (called every second by
+        the app's timer tick), so the Duration line stays live."""
+        try:
+            session_section = self.query_one("#mwm-session-section", Static)
+            session_section.update(self._generate_session_content())
+        except Exception:
+            pass  # Ignore if section not found (e.g. mid-teardown)
+
+    def _create_alltime_section(self) -> Static:
+        stats = self.app_data.mwm_stats
+        lines = [
+            "🏆 ALL-TIME TOTAL",
+            f"Games played: {stats.alltime_games_played}",
+            f"Record: [{stats.alltime_wins}W] - [{stats.alltime_losses}L]"
+            f"{_win_pct(stats.alltime_wins, stats.alltime_losses)}",
+            _on_the_play_line(stats.alltime_plays, stats.alltime_draws),
+        ]
+        return Static("\n".join(lines), classes="mwm-stat-section")
+
+    def _create_trends_section(self) -> Static:
+        stats = self.app_data.mwm_stats
+
+        if not stats.games:
+            return Static("📈 TRENDS\nNo games recorded yet.", classes="mwm-stat-section")
+
+        # Most recent game on the left, falling off to the right as it ages.
+        recent = list(reversed(stats.games[-10:]))
+
+        result_glyphs = "".join(
+            "[rgb(255,215,0)]W[/rgb(255,215,0)]" if g.result == MWMGameResult.WIN else "[red]L[/red]"
+            for g in recent
+        )
+        play_draw_glyphs = "".join(
+            "[cyan]P[/cyan]"
+            if g.play_draw == "Play"
+            else "[magenta]D[/magenta]" if g.play_draw == "Draw" else "[dim]?[/dim]"
+            for g in recent
+        )
+
+        lines = [
+            "📈 TRENDS",
+            f"Games:     {result_glyphs}",
+            f"Play/Draw: {play_draw_glyphs}",
+        ]
+        return Static("\n".join(lines), classes="mwm-stat-section")
+
+
 class EditStatsModal(ModalScreen):
     """Modal dialog for editing session/season stats."""
     
@@ -1660,6 +1838,8 @@ class SwitchModeModal(ModalScreen):
                 with Horizontal(classes="switch-mode-modal-row"):
                     yield Button("Limited", id="mode-limited", variant="primary")
                     yield Button("Event", id="mode-event", variant="primary")
+                with Horizontal(classes="switch-mode-modal-row"):
+                    yield Button("Mid Week Magic", id="mode-mwm", variant="primary")
             with Horizontal(classes="switch-mode-modal-buttons"):
                 yield Button("Cancel", id="cancel", variant="error")
 
@@ -1669,6 +1849,7 @@ class SwitchModeModal(ModalScreen):
             "mode-bo3": ("ranked", FormatType.CONSTRUCTED_BO3),
             "mode-limited": ("ranked", FormatType.LIMITED),
             "mode-event": ("event", None),
+            "mode-mwm": ("mwm", None),
         }
         if event.button.id in mapping:
             self.dismiss(mapping[event.button.id])
@@ -2424,7 +2605,8 @@ class ImportDataModal(ModalScreen):
         self.dismiss(None)
 
 class SetEventDeckModal(ModalScreen):
-    """Modal for setting/editing the deck being played in an event run."""
+    """Modal for setting/editing the deck being played in an event run (or
+    Mid Week Magic's session-level current_deck)."""
 
     BINDINGS = [
         Binding("escape", "cancel", "Cancel"),
@@ -2451,13 +2633,14 @@ class SetEventDeckModal(ModalScreen):
     }
     """
 
-    def __init__(self, current_value: str = "", **kwargs):
+    def __init__(self, current_value: str = "", title: str = "What deck are you running?", **kwargs):
         super().__init__(**kwargs)
         self.current_value = current_value
+        self.title_text = title
 
     def compose(self) -> ComposeResult:
         with Container(classes="event-deck-modal-container"):
-            yield Static("What deck are you running?", classes="modal-title")
+            yield Static(self.title_text, classes="modal-title")
             yield Input(
                 value=self.current_value,
                 placeholder="e.g. Mono Red Aggro (blank = Unknown)",
@@ -2479,13 +2662,16 @@ class SetEventDeckModal(ModalScreen):
         self.dismiss(None)
 
 class EventGameNotesModal(ModalScreen):
-    """Modal for opponent deck + play/draw on an event game.
+    """Modal for opponent deck + play/draw on an event (or Mid Week Magic)
+    game.
 
     Used either proactively (N key, before/after any game) or as a
     fallback prompt when W/L is pressed with nothing entered yet for
     that game - in the fallback case there's no Cancel button, since the
     win/loss itself is already decided; Unknown/blank is always a valid,
-    one-keypress-away answer for both fields.
+    one-keypress-away answer for both fields. include_player_deck adds a
+    "Your Deck" field (Mid Week Magic only - an event run's deck is set
+    once per run, not per game, so Event Mode never needs this).
     """
 
     BINDINGS = [
@@ -2504,6 +2690,10 @@ class EventGameNotesModal(ModalScreen):
         background: $surface;
         padding: 2;
         overflow-y: auto;
+    }
+
+    .event-notes-modal-container.with-player-deck {
+        height: 33;
     }
 
     .event-notes-row {
@@ -2540,19 +2730,33 @@ class EventGameNotesModal(ModalScreen):
         existing: Optional[dict] = None,
         forced: bool = False,
         include_result: bool = False,
+        include_player_deck: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.existing = existing or {}
         self.forced = forced
         self.include_result = include_result
+        self.include_player_deck = include_player_deck
 
     def compose(self) -> ComposeResult:
-        with Container(classes="event-notes-modal-container"):
+        container_classes = "event-notes-modal-container"
+        if self.include_player_deck:
+            container_classes += " with-player-deck"
+        with Container(classes=container_classes):
             yield Static(
                 "Game Info (Unknown is fine)" if self.forced else "Edit Game",
                 classes="modal-title",
             )
+            if self.include_player_deck:
+                with Horizontal(classes="event-notes-row"):
+                    yield Static("Your Deck:", classes="event-notes-label")
+                    yield Input(
+                        value=self.existing.get("player_deck") or "",
+                        placeholder="e.g. Mono Black Pauper (blank = Unknown)",
+                        id="event-player-deck-input",
+                        classes="event-notes-input",
+                    )
             with Horizontal(classes="event-notes-row"):
                 yield Static("Opponent Name:", classes="event-notes-label")
                 yield Input(
@@ -2615,6 +2819,9 @@ class EventGameNotesModal(ModalScreen):
         }
         if self.include_result:
             result["result"] = self.query_one("#event-result-select", Select).value
+        if self.include_player_deck:
+            player_deck = self.query_one("#event-player-deck-input", Input).value.strip()
+            result["player_deck"] = player_deck or None
         self.dismiss(result)
 
     def action_cancel(self) -> None:
@@ -2778,42 +2985,137 @@ class EventGamesViewerModal(ModalScreen):
         game.play_draw = result.get("play_draw")
         game.notes = result.get("notes") or ""
 
-        new_result = EventGameResult(result["result"])
-        if new_result == game.result:
+        # session_*/alltime_* are all computed live from recent_runs (see
+        # EventStats), and `run` is that same object in place (a member of
+        # recent_runs once ended, or of current_run before then) - so
+        # changing game.result here is reflected automatically everywhere,
+        # regardless of whether the run has already ended.
+        game.result = EventGameResult(result["result"])
+
+    def action_cancel(self) -> None:
+        self.dismiss("updated" if self.has_changes else None)
+
+class MWMGamesViewerModal(ModalScreen):
+    """Modal for viewing and editing every Mid Week Magic game ever played
+    (Ctrl+G). No run wrapper to worry about here - session_*/alltime_* are
+    computed live from MWMStats.games, so editing a game in place (it's a
+    member of that same list) is reflected automatically, with no un-fold/
+    re-fold dance needed regardless of when the game was played."""
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+        Binding("enter", "edit_selected", "Edit Selected"),
+    ]
+
+    CSS = """
+    MWMGamesViewerModal {
+        align: center middle;
+    }
+
+    #mwm-games-dialog {
+        width: 115;
+        height: 30;
+        border: thick $primary;
+        background: $surface;
+        padding: 1;
+    }
+
+    .mwm-games-list {
+        height: 1fr;
+        border: solid $secondary;
+        margin: 1 0;
+    }
+
+    .mwm-games-buttons {
+        height: 3;
+        content-align: center middle;
+    }
+    """
+
+    def __init__(self, mwm_stats: MWMStats, **kwargs):
+        super().__init__(**kwargs)
+        self.mwm_stats = mwm_stats
+        self.has_changes = False
+        self._rows: List[MWMGame] = []
+
+    def compose(self) -> ComposeResult:
+        with Container(id="mwm-games-dialog"):
+            yield Label("Mid Week Magic Game History", classes="modal-title")
+            yield Label(
+                "Use ↑↓ to select, then click Edit (result/deck/play-draw/notes)",
+                classes="help-text",
+            )
+            table = DataTable(id="mwm-games-table", classes="mwm-games-list")
+            table.add_columns(
+                "#", "Result", "Play/Draw", "Your Deck", "Opponent Deck", "Opponent Name"
+            )
+            table.cursor_type = "row"
+            yield table
+            with Horizontal(classes="mwm-games-buttons"):
+                yield Button("Edit Selected", id="edit", variant="success")
+                yield Button("Close", id="close", variant="primary")
+
+    def on_mount(self) -> None:
+        self._populate()
+
+    def _populate(self) -> None:
+        table = self.query_one("#mwm-games-table", DataTable)
+        table.clear()
+        # Newest game first (true reverse-chronological order). Game
+        # numbers stay their true 1-based play order; only display order
+        # reverses.
+        numbered_games = list(enumerate(self.mwm_stats.games, 1))
+        self._rows = [game for _, game in reversed(numbered_games)]
+        for i, game in reversed(numbered_games):
+            table.add_row(
+                str(i),
+                game.result.value,
+                _format_play_draw(game.play_draw),
+                game.player_deck or "Unknown",
+                game.opponent_deck or "Unknown",
+                game.opponent_name or "Unknown",
+            )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "edit":
+            self.action_edit_selected()
+        else:
+            self.dismiss("updated" if self.has_changes else None)
+
+    def action_edit_selected(self) -> None:
+        table = self.query_one("#mwm-games-table", DataTable)
+        if table.cursor_row is None or table.cursor_row >= len(self._rows):
             return
+        game = self._rows[table.cursor_row]
 
-        if run.status != EventRunStatus.ENDED or self.event is None:
-            # Run hasn't been folded into session/alltime totals yet -
-            # wins/losses are computed live from run.games, so nothing
-            # else needs adjusting.
-            game.result = new_result
-            return
+        modal = EventGameNotesModal(
+            {
+                "result": game.result.value,
+                "player_deck": game.player_deck,
+                "opponent_deck": game.opponent_deck,
+                "opponent_name": game.opponent_name,
+                "play_draw": game.play_draw,
+                "notes": game.notes,
+            },
+            include_result=True,
+            include_player_deck=True,
+        )
 
-        # Run already folded into totals: un-fold its old contribution from
-        # session (the stored counters), apply the edit, then re-fold the
-        # new contribution. All-time needs no such dance - it's computed
-        # live from recent_runs, so editing `run` in place (it's a member
-        # of that list) is reflected automatically.
-        old_prize = run.prize(self.event)
-        old_wins, old_losses = run.wins, run.losses
-        old_milestones = {m.name for m in self.event.milestones_met(old_wins)}
+        def handle_result(result):
+            if result is not None:
+                self._apply_edit(game, result)
+                self.has_changes = True
+                self._populate()
 
-        game.result = new_result
+        self.app.push_screen(modal, handle_result)
 
-        new_prize = run.prize(self.event)
-        new_wins, new_losses = run.wins, run.losses
-        new_milestones = {m.name for m in self.event.milestones_met(new_wins)}
-
-        stats = self.event_stats
-        stats.session_wins += new_wins - old_wins
-        stats.session_losses += new_losses - old_losses
-        stats.session_gems += new_prize.gems - old_prize.gems
-        stats.session_packs += new_prize.packs - old_prize.packs
-
-        for name in old_milestones - new_milestones:
-            stats.session_milestone_counts[name] = max(0, stats.session_milestone_counts.get(name, 0) - 1)
-        for name in new_milestones - old_milestones:
-            stats.session_milestone_counts[name] = stats.session_milestone_counts.get(name, 0) + 1
+    def _apply_edit(self, game: MWMGame, result: dict) -> None:
+        game.player_deck = result.get("player_deck")
+        game.opponent_deck = result.get("opponent_deck")
+        game.opponent_name = result.get("opponent_name")
+        game.play_draw = result.get("play_draw")
+        game.notes = result.get("notes") or ""
+        game.result = MWMGameResult(result["result"])
 
     def action_cancel(self) -> None:
         self.dismiss("updated" if self.has_changes else None)
@@ -3132,7 +3434,7 @@ class ManualTUIApp(App):
         margin: 1 0;
     }
 
-    .event-stat-section {
+    .event-stat-section, .mwm-stat-section {
         margin: 0 0 1 0;
     }
     
@@ -3207,7 +3509,7 @@ class ManualTUIApp(App):
 
     .switch-mode-modal-container {
         width: 50;
-        height: 20;
+        height: 24;
         border: solid $primary;
         background: $surface;
         padding: 2;
@@ -3284,22 +3586,40 @@ class ManualTUIApp(App):
         "view_all_notes",
     }
 
+    # Event-only actions with no Mid Week Magic equivalent (no runs to
+    # start/concede/view a history of) - hidden from the Footer while in
+    # MWM mode. set_event_deck/view_event_games/wipe_event_alltime aren't
+    # here since they're context-sensitive and do something useful in MWM
+    # too (see action_set_event_deck etc.).
+    EVENT_ONLY_ACTIONS = {
+        "start_event_run",
+        "view_event_runs",
+    }
+
     def __init__(self, state_manager: StateManager):
         super().__init__()
         self.state_manager = state_manager
         self.app_data = state_manager.load_state()
         self.event_catalog = load_event_catalog(default_catalog_path())
+        self.mwm_catalog = load_mwm_catalog(default_mwm_catalog_path())
         self._pending_event_game_notes: Optional[dict] = None
+        self._pending_mwm_game_notes: Optional[dict] = None
 
     def check_action(self, action: str, parameters: tuple) -> Optional[bool]:
-        """Hide ranked-only keybindings from the Footer while in Event Mode."""
-        if self.app_data.view_mode == "event" and action in self.RANKED_ONLY_ACTIONS:
+        """Hide ranked-only keybindings from the Footer while in Event Mode
+        or Mid Week Magic, and hide event-only keybindings (no equivalent
+        without runs) while in Mid Week Magic."""
+        if self.app_data.view_mode != "ranked" and action in self.RANKED_ONLY_ACTIONS:
+            return False
+        if self.app_data.view_mode == "mwm" and action in self.EVENT_ONLY_ACTIONS:
             return False
         return True
 
     def compose(self) -> ComposeResult:
         with Container():
-            yield TopPanel(self.app_data, self.event_catalog).add_class("top-panel")
+            yield TopPanel(self.app_data, self.event_catalog, self.mwm_catalog).add_class(
+                "top-panel"
+            )
 
             with Container(id="main-content"):
                 if self.app_data.view_mode == "event":
@@ -3307,6 +3627,9 @@ class ManualTUIApp(App):
                     yield EventStatsPanel(self.app_data, self.event_catalog).add_class(
                         "right-panel"
                     )
+                elif self.app_data.view_mode == "mwm":
+                    yield MWMPanel(self.app_data, self.mwm_catalog).add_class("left-panel")
+                    yield MWMStatsPanel(self.app_data, self.mwm_catalog).add_class("right-panel")
                 else:
                     yield RankProgressPanel(self.app_data).add_class("left-panel")
                     yield StatsPanel(self.app_data).add_class("right-panel")
@@ -3359,6 +3682,13 @@ class ManualTUIApp(App):
             except Exception as e:
                 self.notify(f"Event session timer error: {e}", severity="error")
             return
+        if self.app_data.view_mode == "mwm":
+            try:
+                mwm_stats_panel = self.query_one(MWMStatsPanel)
+                mwm_stats_panel.refresh_session_section()
+            except Exception as e:
+                self.notify(f"Mid Week Magic session timer error: {e}", severity="error")
+            return
         try:
             # Find stats panel and tell it to refresh its session section
             stats_panel = self.query_one(StatsPanel)
@@ -3389,9 +3719,13 @@ class ManualTUIApp(App):
         return current_rank.division <= goal_division
     
     def action_add_win(self) -> None:
-        """Add a win to the session (or the current event run, in Event Mode)."""
+        """Add a win to the session (or the current event run, in Event
+        Mode; or a Mid Week Magic game, in MWM mode)."""
         if self.app_data.view_mode == "event":
             self._event_record_result(EventGameResult.WIN)
+            return
+        if self.app_data.view_mode == "mwm":
+            self._mwm_record_result(MWMGameResult.WIN)
             return
 
         # Check goal status before the win
@@ -3429,9 +3763,13 @@ class ManualTUIApp(App):
         self.refresh_panels()
     
     def action_add_loss(self) -> None:
-        """Add a loss to the session (or the current event run, in Event Mode)."""
+        """Add a loss to the session (or the current event run, in Event
+        Mode; or a Mid Week Magic game, in MWM mode)."""
         if self.app_data.view_mode == "event":
             self._event_record_result(EventGameResult.LOSS)
+            return
+        if self.app_data.view_mode == "mwm":
+            self._mwm_record_result(MWMGameResult.LOSS)
             return
 
         # Update rank
@@ -3449,8 +3787,8 @@ class ManualTUIApp(App):
         self.refresh_panels()
     
     def action_switch_format(self) -> None:
-        """Open a modal to switch between ranked formats (BO1/BO3/Limited)
-        and Event Mode."""
+        """Open a modal to switch between ranked formats (BO1/BO3/Limited),
+        Event Mode, and Mid Week Magic."""
         modal = SwitchModeModal(self.app_data.current_format, self.app_data.view_mode)
 
         def handle_result(result):
@@ -3460,6 +3798,9 @@ class ManualTUIApp(App):
             if mode == "event":
                 self.app_data.view_mode = "event"
                 self.notify("Switched to Event view", severity="information")
+            elif mode == "mwm":
+                self.app_data.view_mode = "mwm"
+                self.notify("Switched to Mid Week Magic view", severity="information")
             else:
                 self.app_data.view_mode = "ranked"
                 self.app_data.current_format = format_type
@@ -3469,9 +3810,14 @@ class ManualTUIApp(App):
         self.push_screen(modal, handle_result)
     
     def action_set_goal(self) -> None:
-        """Set session goal rank (ranked), or per-run win goal (Event Mode)."""
+        """Set session goal rank (ranked), or per-run win goal (Event
+        Mode). No equivalent in Mid Week Magic - there's no rank or
+        run to set a goal against."""
         if self.app_data.view_mode == "event":
             self._event_set_goal()
+            return
+        if self.app_data.view_mode == "mwm":
+            self.notify("Not applicable in Mid Week Magic mode", severity="warning")
             return
 
         current_rank = self.app_data.get_current_rank()
@@ -3512,9 +3858,12 @@ class ManualTUIApp(App):
     
     def action_add_game_notes(self) -> None:
         """Add detailed game notes (ranked), or set opponent deck / play-draw
-        for the upcoming event game (Event Mode)."""
+        for the upcoming game (Event Mode / Mid Week Magic)."""
         if self.app_data.view_mode == "event":
             self._event_add_game_notes()
+            return
+        if self.app_data.view_mode == "mwm":
+            self._mwm_add_game_notes()
             return
 
         modal = GameNotesModal()
@@ -3659,9 +4008,13 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
     
     def action_collapse_tiers(self) -> None:
         """Toggle auto-collapse mode for completed tiers (ranked), or
-        concede the current run early (Event Mode)."""
+        concede the current run early (Event Mode). No equivalent in Mid
+        Week Magic - there's no run to concede."""
         if self.app_data.view_mode == "event":
             self._event_concede_run()
+            return
+        if self.app_data.view_mode == "mwm":
+            self.notify("Not applicable in Mid Week Magic mode", severity="warning")
             return
 
         # Toggle auto-collapse mode
@@ -3713,9 +4066,13 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
         self.refresh_panels()
     
     def action_restart_session(self) -> None:
-        """Restart current session (same as reset), or the event session in Event Mode."""
+        """Restart current session (same as reset), the event session in
+        Event Mode, or the Mid Week Magic session."""
         if self.app_data.view_mode == "event":
             self._event_restart_session()
+            return
+        if self.app_data.view_mode == "mwm":
+            self._mwm_restart_session()
             return
 
         modal = ConfirmationModal("Restart session? This will reset wins/losses and session timer.")
@@ -3768,7 +4125,12 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
         self.push_screen(deck_modal, handle_deck_result)
 
     def action_set_event_deck(self) -> None:
-        """Set/edit the deck for the current event run (Event Mode only)."""
+        """Set/edit the deck for the current event run (Event Mode), or the
+        session-level current deck (Mid Week Magic - prefills new games,
+        each of which can still override it individually via N)."""
+        if self.app_data.view_mode == "mwm":
+            self._mwm_set_deck()
+            return
         if self.app_data.view_mode != "event":
             self.notify("Press F and choose Event to switch to Event Mode first", severity="warning")
             return
@@ -3923,11 +4285,130 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
 
         self.push_screen(modal, handle_result)
 
+    def _mwm_set_deck(self) -> None:
+        """Set the session-level current deck (Mid Week Magic, D key).
+        Prefills new games' player_deck; each game can still override it
+        individually via N."""
+        stats = self.app_data.mwm_stats
+        modal = SetEventDeckModal(
+            stats.current_deck or "", title="What deck are you playing this session?"
+        )
+
+        def handle_result(value):
+            if value is not None:
+                stats.current_deck = value.strip() or None
+                self.refresh_panels()
+
+        self.push_screen(modal, handle_result)
+
+    def _mwm_add_game_notes(self) -> None:
+        """Set your deck / opponent deck / play-draw for the upcoming game
+        (Mid Week Magic, N key). Stashed until the next W/L, which will use
+        it instead of prompting again. Your Deck is prefilled from the
+        session-level current_deck the first time this is opened."""
+        stats = self.app_data.mwm_stats
+        existing = self._pending_mwm_game_notes
+        if existing is None:
+            existing = {"player_deck": stats.current_deck}
+
+        modal = EventGameNotesModal(existing, include_player_deck=True)
+
+        def handle_result(result):
+            if result is not None:
+                self._pending_mwm_game_notes = result
+                self.notify("Saved - will apply to the next game recorded", severity="success")
+
+        self.push_screen(modal, handle_result)
+
+    def _mwm_record_result(self, result: MWMGameResult) -> None:
+        """Record a win/loss as a Mid Week Magic game.
+
+        If deck/opponent info were already set via N since the last game,
+        use them. Otherwise prompt for them now (Unknown/blank is a
+        one-keypress-away valid answer) since the win/loss itself is
+        already decided and shouldn't wait on that prompt to be recorded.
+        """
+        stats = self.app_data.mwm_stats
+
+        if self._pending_mwm_game_notes is not None:
+            notes = self._pending_mwm_game_notes
+            self._pending_mwm_game_notes = None
+            self._finish_mwm_game(result, notes)
+        else:
+            modal = EventGameNotesModal(
+                {"player_deck": stats.current_deck}, forced=True, include_player_deck=True
+            )
+
+            def handle_result(notes):
+                self._finish_mwm_game(result, notes or {})
+
+            self.push_screen(modal, handle_result)
+
+    def _finish_mwm_game(self, result: MWMGameResult, notes: dict) -> None:
+        """Actually record the game once deck/opponent info are known."""
+        stats = self.app_data.mwm_stats
+        game = MWMGame(
+            result=result,
+            player_deck=notes.get("player_deck") or stats.current_deck,
+            opponent_deck=notes.get("opponent_deck"),
+            opponent_name=notes.get("opponent_name"),
+            play_draw=notes.get("play_draw"),
+            notes=notes.get("notes") or "",
+        )
+        stats.record_game(game)
+        self.refresh_panels()
+
+    def _mwm_view_games(self) -> None:
+        """Show and edit every Mid Week Magic game ever played (Ctrl+G)."""
+        modal = MWMGamesViewerModal(self.app_data.mwm_stats)
+
+        def handle_result(result):
+            if result == "updated":
+                self.state_manager.save_state(self.app_data)
+                self.refresh_panels()
+                self.notify("Game updated", severity="success")
+
+        self.push_screen(modal, handle_result)
+
+    def _mwm_restart_session(self) -> None:
+        """Reset Mid Week Magic session totals (keeps all-time totals), with
+        confirmation."""
+        modal = ConfirmationModal(
+            "Restart Mid Week Magic session? This clears session totals "
+            "(all-time totals are kept)."
+        )
+
+        def handle_result(result):
+            if result:
+                self.app_data.mwm_stats.restart_session()
+                self.refresh_panels()
+
+        self.push_screen(modal, handle_result)
+
+    def _mwm_wipe_alltime(self) -> None:
+        """Permanently wipe Mid Week Magic all-time totals."""
+        modal = ConfirmationModal(
+            "Wipe ALL-TIME Mid Week Magic totals? This permanently erases every "
+            "game ever recorded and the current deck, and also clears the "
+            "current session. This cannot be undone."
+        )
+
+        def handle_result(result):
+            if result:
+                self.app_data.mwm_stats.wipe_alltime()
+                self.refresh_panels()
+                self.notify("All-time Mid Week Magic totals wiped", severity="warning")
+
+        self.push_screen(modal, handle_result)
+
     def action_view_event_games(self) -> None:
-        """Show and edit the flat game history (this run + recent completed
-        runs), Event Mode Ctrl+G, including result - the modal itself keeps
-        the session/all-time totals in sync when a completed run's result
-        changes."""
+        """Show and edit the flat game history: this run + recent completed
+        runs in Event Mode (Ctrl+G, including result - the modal itself
+        keeps the session/all-time totals in sync when a completed run's
+        result changes), or every game ever played in Mid Week Magic."""
+        if self.app_data.view_mode == "mwm":
+            self._mwm_view_games()
+            return
         if self.app_data.view_mode != "event":
             self.notify("Press F and choose Event to switch to Event Mode first", severity="warning")
             return
@@ -3976,7 +4457,11 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
         self.push_screen(modal, handle_result)
 
     def action_wipe_event_alltime(self) -> None:
-        """Permanently wipe event all-time totals (Event Mode only)."""
+        """Permanently wipe event all-time totals (Event Mode), or Mid Week
+        Magic all-time totals (MWM mode)."""
+        if self.app_data.view_mode == "mwm":
+            self._mwm_wipe_alltime()
+            return
         if self.app_data.view_mode != "event":
             self.notify("Press F and choose Event to switch to Event Mode first", severity="warning")
             return
@@ -4051,7 +4536,12 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
 
     def action_pause_resume_session(self) -> None:
         """Pause or resume the session timer."""
-        stats = self.app_data.event_stats if self.app_data.view_mode == "event" else self.app_data.stats
+        if self.app_data.view_mode == "event":
+            stats = self.app_data.event_stats
+        elif self.app_data.view_mode == "mwm":
+            stats = self.app_data.mwm_stats
+        else:
+            stats = self.app_data.stats
 
         if stats.session_paused:
             # Resume the session
@@ -4203,7 +4693,7 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
 
 Keyboard Shortcuts:
 W/+ - Add win       L/- - Add loss
-F - Switch mode (Constructed BO1/BO3, Limited, or Event)
+F - Switch mode (Constructed BO1/BO3, Limited, Event, or Mid Week Magic)
 G - Set session goal    T - Set season start rank
 E - Edit stats (streaks, session start)
 N - Add game notes    Ctrl+N - View all notes
@@ -4225,7 +4715,18 @@ Ctrl+R - Browse run history, drill into a run's games
 R - Restart event session
 Ctrl+W - Wipe all-time event totals (cannot be undone)
 
-M/T/E/H/S are ranked-only and not available in Event Mode.
+M/T/E/H/S/G/U/Ctrl+R are not available in Event Mode where noted above.
+
+Mid Week Magic:
+F - Switch mode (choose Mid Week Magic)
+W/L - Win/loss    D - Set current deck (prefills new games)
+N - Set your deck/opponent deck/play-draw/notes (applies to the next game)
+Ctrl+G - View/edit full game history (deck, play-draw, notes, result)
+R - Restart Mid Week Magic session
+Ctrl+W - Wipe all-time Mid Week Magic totals (cannot be undone)
+
+M/T/E/H/S/G are ranked-only; U and Ctrl+R (runs) have no meaning here since
+there's no win/loss cap - just a running game log.
 
 Manual Editing:
 Click any [bracketed] value to edit inline
@@ -4293,6 +4794,13 @@ Press any key to close this help."""
                 )
                 main_content.mount(
                     EventStatsPanel(self.app_data, self.event_catalog).add_class("right-panel")
+                )
+            elif self.app_data.view_mode == "mwm":
+                main_content.mount(
+                    MWMPanel(self.app_data, self.mwm_catalog).add_class("left-panel")
+                )
+                main_content.mount(
+                    MWMStatsPanel(self.app_data, self.mwm_catalog).add_class("right-panel")
                 )
             else:
                 main_content.mount(RankProgressPanel(self.app_data).add_class("left-panel"))

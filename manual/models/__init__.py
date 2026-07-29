@@ -21,6 +21,15 @@ from .event import (
     default_catalog_path,
     load_event_catalog,
 )
+from .mwm import (
+    MWMFormatDefinition,
+    MWMGame,
+    MWMGameResult,
+    MWMStats,
+    current_mwm_format,
+    default_mwm_catalog_path,
+    load_mwm_catalog,
+)
 
 __all__ = [
     'FormatType',
@@ -41,4 +50,11 @@ __all__ = [
     'PrizeTotal',
     'default_catalog_path',
     'load_event_catalog',
+    'MWMFormatDefinition',
+    'MWMGame',
+    'MWMGameResult',
+    'MWMStats',
+    'current_mwm_format',
+    'default_mwm_catalog_path',
+    'load_mwm_catalog',
 ]
