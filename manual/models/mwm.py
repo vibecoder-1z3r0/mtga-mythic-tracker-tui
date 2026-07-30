@@ -172,6 +172,31 @@ class MWMStats:
         """Record a completed game."""
         self.games.append(game)
 
+    def backfill(self, wins: int, losses: int) -> None:
+        """Add `wins` win-games and `losses` loss-games with no opponent
+        detail, for correcting/backfilling all-time totals to reflect
+        games played before this tracker was used - there's no real
+        per-game info to enter for those.
+
+        Inserted BEFORE the current session boundary (not appended), with
+        session_start_game_count shifted forward by the same count, so
+        they land in alltime_* immediately without also being counted as
+        part of the current session - games[session_start_game_count:]
+        (the actual definition of "this session") is left pointing at
+        exactly the same real games as before the insert.
+        """
+        added = [
+            MWMGame(result=MWMGameResult.WIN, notes="Backfilled historical result")
+            for _ in range(wins)
+        ]
+        added += [
+            MWMGame(result=MWMGameResult.LOSS, notes="Backfilled historical result")
+            for _ in range(losses)
+        ]
+        insert_at = self.session_start_game_count
+        self.games[insert_at:insert_at] = added
+        self.session_start_game_count += len(added)
+
     def restart_session(self) -> None:
         """Start a new session boundary: session_* stats (computed from
         games[session_start_game_count:]) read as zero going forward,

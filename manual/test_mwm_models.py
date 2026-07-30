@@ -114,6 +114,35 @@ def test_mwm_stats_restart_session_preserves_alltime():
     assert stats.alltime_losses == 1
 
 
+def test_mwm_stats_backfill_only_affects_alltime():
+    """Test that backfill() bumps alltime_* by the given amounts without
+    changing session_* at all, regardless of whether it's called before
+    or after real games have been recorded this session."""
+    stats = MWMStats()
+    stats.record_game(MWMGame(result=MWMGameResult.WIN))
+    stats.record_game(MWMGame(result=MWMGameResult.LOSS))
+    assert stats.session_wins == 1 and stats.session_losses == 1
+    assert stats.alltime_wins == 1 and stats.alltime_losses == 1
+
+    stats.backfill(wins=5, losses=2)
+    # Session totals must be exactly what they were before the backfill.
+    assert stats.session_wins == 1
+    assert stats.session_losses == 1
+    # All-time gains the backfilled amount on top of the real games.
+    assert stats.alltime_wins == 6
+    assert stats.alltime_losses == 3
+
+    # A second backfill after a session restart should still only ever
+    # touch all-time, never the new session's own totals.
+    stats.restart_session()
+    stats.record_game(MWMGame(result=MWMGameResult.WIN))
+    stats.backfill(wins=1, losses=1)
+    assert stats.session_wins == 1
+    assert stats.session_losses == 0
+    assert stats.alltime_wins == 8
+    assert stats.alltime_losses == 4
+
+
 def test_mwm_stats_pause_resume_excludes_paused_time_from_duration():
     """Test that time spent paused doesn't count toward session_duration()."""
     stats = MWMStats()
@@ -204,6 +233,7 @@ def main():
     test_mwm_game_records_fields()
     test_mwm_stats_session_and_alltime_aggregation()
     test_mwm_stats_restart_session_preserves_alltime()
+    test_mwm_stats_backfill_only_affects_alltime()
     test_mwm_stats_pause_resume_excludes_paused_time_from_duration()
     test_mwm_stats_wipe_alltime_clears_everything()
     test_state_manager_persists_mwm_stats()

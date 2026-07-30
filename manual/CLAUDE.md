@@ -547,6 +547,35 @@ since there's no win/loss cap to group them into runs.
   `game.result = new_result` alone is sufficient, since `run` is the
   same object already living in `recent_runs` and everything reads from
   there live.
+- **Backfilling all-time totals** (`MWMStats.backfill(wins, losses)`,
+  **B** key, `BackfillMWMModal`): since `alltime_*` has no stored field
+  to just overwrite (it's computed live from `games`), backfilling means
+  adding that many placeholder `MWMGame`s with no opponent detail - there
+  genuinely is nothing to enter for games played before the tracker was
+  used. The key subtlety: these must count toward all-time *without*
+  also counting toward the current session. Appending them (like
+  `record_game()` does) would land them after `session_start_game_count`
+  and incorrectly inflate the current session's record too. Instead
+  they're **inserted at** `session_start_game_count` (before the
+  session's real games) and the boundary index is shifted forward by
+  the same count, so `games[session_start_game_count:]` - "this
+  session," by definition - still resolves to exactly the same real
+  games as before the insert, regardless of how many times `backfill()`
+  is called or whether it's called before or after a session restart.
+  Verified both at the model layer and via a headless pilot that
+  backfills mid-session and confirms the session record is untouched
+  while all-time jumps by the backfilled amount.
+- `BackfillMWMModal` had the same class of bug already fixed twice this
+  session for other modals: its container was declared `height: 18`,
+  too short for title + help text + two input rows + buttons, so the
+  Save/Cancel row rendered 1 row past the container's bottom edge.
+  Textual still laid out the buttons at that position, but
+  `pilot.click("#save")` reported `False` (click didn't land on the
+  target widget) since the row was clipped there - a `NoMatches`-style
+  error isn't raised in this case, the click's return value has to be
+  checked to catch it. Fixed by bumping the container to `height: 22`
+  (plus `overflow-y: auto` as a safety net) and confirmed
+  `pilot.click(...)` returns `True` and the modal actually dismisses.
 
 ## TUI Layout
 

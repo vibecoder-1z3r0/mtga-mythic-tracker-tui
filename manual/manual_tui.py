@@ -1413,7 +1413,7 @@ class MWMPanel(Static):
             yield Static(
                 "[W] Win  [L] Loss  [D] Set Deck  [N] Opp Deck/Play-Draw  "
                 "[Ctrl+G] Game History  [R] Restart Session  "
-                "[Ctrl+W] Wipe All-Time  [F] Switch Mode",
+                "[Ctrl+W] Wipe All-Time  [B] Backfill All-Time  [F] Switch Mode",
                 classes="help-text",
             )
 
@@ -2547,6 +2547,82 @@ class SetEventGoalModal(ModalScreen):
         """Cancel and close modal without changing anything."""
         self.dismiss(None)
 
+class BackfillMWMModal(ModalScreen):
+    """Modal for backfilling Mid Week Magic's all-time totals with wins/
+    losses played before this tracker was used (Mid Week Magic, B key).
+    Adds that many placeholder games with no opponent detail - there's
+    nothing real to enter for games that were never tracked."""
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    CSS = """
+    BackfillMWMModal {
+        align: center middle;
+    }
+
+    .mwm-backfill-modal-container {
+        width: 60;
+        height: 22;
+        border: solid $primary;
+        background: $surface;
+        padding: 2;
+        overflow-y: auto;
+    }
+
+    .mwm-backfill-row {
+        height: 3;
+    }
+
+    .mwm-backfill-label {
+        width: 20;
+        content-align: right middle;
+        padding-right: 1;
+    }
+
+    .mwm-backfill-modal-buttons {
+        height: 3;
+        margin-top: 1;
+        align: center middle;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        with Container(classes="mwm-backfill-modal-container"):
+            yield Static("Backfill All-Time Totals", classes="modal-title")
+            yield Static(
+                "Adds placeholder wins/losses for games played before you "
+                "started tracking. Does not affect this session's record.",
+                classes="help-text",
+            )
+            with Horizontal(classes="mwm-backfill-row"):
+                yield Static("Wins to add:", classes="mwm-backfill-label")
+                yield Input(value="0", id="mwm-backfill-wins-input", type="integer")
+            with Horizontal(classes="mwm-backfill-row"):
+                yield Static("Losses to add:", classes="mwm-backfill-label")
+                yield Input(value="0", id="mwm-backfill-losses-input", type="integer")
+            with Horizontal(classes="mwm-backfill-modal-buttons"):
+                yield Button("Add", id="save", variant="success")
+                yield Button("Cancel", id="cancel", variant="error")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "save":
+            wins_str = self.query_one("#mwm-backfill-wins-input", Input).value.strip()
+            losses_str = self.query_one("#mwm-backfill-losses-input", Input).value.strip()
+            wins = int(wins_str) if wins_str.isdigit() else 0
+            losses = int(losses_str) if losses_str.isdigit() else 0
+            if wins == 0 and losses == 0:
+                self.notify("Enter at least one win or loss to add", severity="warning")
+                return
+            self.dismiss((wins, losses))
+        else:
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        """Cancel and close modal without changing anything."""
+        self.dismiss(None)
+
 class ImportDataModal(ModalScreen):
     """Modal for entering a file path to import (Ctrl+O). Importing
     replaces ALL current data, so this only collects the path here -
@@ -3569,6 +3645,7 @@ class ManualTUIApp(App):
         Binding("ctrl+g", "view_event_games", "Game History (Event Mode)"),
         Binding("ctrl+r", "view_event_runs", "Run History (Event Mode)"),
         Binding("ctrl+w", "wipe_event_alltime", "Wipe All-Time (Event Mode)"),
+        Binding("b", "mwm_backfill", "Backfill All-Time (Mid Week Magic)"),
         Binding("ctrl+e", "export_data", "Export Data (Backup)"),
         Binding("ctrl+o", "import_data", "Import Data"),
     ]
@@ -3596,6 +3673,14 @@ class ManualTUIApp(App):
         "view_event_runs",
     }
 
+    # Mid Week Magic-only actions - hidden from the Footer everywhere else,
+    # since backfilling an all-time total has no meaning for ranked (which
+    # already has Edit Stats for that) or Event Mode (whose totals are
+    # tied to specific runs, not a flat game count).
+    MWM_ONLY_ACTIONS = {
+        "mwm_backfill",
+    }
+
     def __init__(self, state_manager: StateManager):
         super().__init__()
         self.state_manager = state_manager
@@ -3607,11 +3692,14 @@ class ManualTUIApp(App):
 
     def check_action(self, action: str, parameters: tuple) -> Optional[bool]:
         """Hide ranked-only keybindings from the Footer while in Event Mode
-        or Mid Week Magic, and hide event-only keybindings (no equivalent
-        without runs) while in Mid Week Magic."""
+        or Mid Week Magic, event-only keybindings (no equivalent without
+        runs) while in Mid Week Magic, and Mid Week Magic-only keybindings
+        everywhere else."""
         if self.app_data.view_mode != "ranked" and action in self.RANKED_ONLY_ACTIONS:
             return False
         if self.app_data.view_mode == "mwm" and action in self.EVENT_ONLY_ACTIONS:
+            return False
+        if self.app_data.view_mode != "mwm" and action in self.MWM_ONLY_ACTIONS:
             return False
         return True
 
@@ -4401,6 +4489,25 @@ Record:   [{stats.season_wins}W] - [{stats.season_losses}L]  {win_rate:.2f}%"""
 
         self.push_screen(modal, handle_result)
 
+    def action_mwm_backfill(self) -> None:
+        """Backfill all-time wins/losses for games played before this
+        tracker was used (Mid Week Magic, B key). Doesn't affect the
+        current session's record."""
+        if self.app_data.view_mode != "mwm":
+            self.notify("Press F and choose Mid Week Magic first", severity="warning")
+            return
+
+        modal = BackfillMWMModal()
+
+        def handle_result(result):
+            if result is not None:
+                wins, losses = result
+                self.app_data.mwm_stats.backfill(wins, losses)
+                self.refresh_panels()
+                self.notify(f"Backfilled {wins}W-{losses}L into all-time totals", severity="success")
+
+        self.push_screen(modal, handle_result)
+
     def action_view_event_games(self) -> None:
         """Show and edit the flat game history: this run + recent completed
         runs in Event Mode (Ctrl+G, including result - the modal itself
@@ -4724,6 +4831,7 @@ N - Set your deck/opponent deck/play-draw/notes (applies to the next game)
 Ctrl+G - View/edit full game history (deck, play-draw, notes, result)
 R - Restart Mid Week Magic session
 Ctrl+W - Wipe all-time Mid Week Magic totals (cannot be undone)
+B - Backfill all-time wins/losses (games played before tracking started)
 
 M/T/E/H/S/G are ranked-only; U and Ctrl+R (runs) have no meaning here since
 there's no win/loss cap - just a running game log.
